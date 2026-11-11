@@ -1,6 +1,2 @@
-export type Day = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
-export type TimeRange = { start: string, end: string }
-export type Schedule = Partial<Record<Day, TimeRange>>
-
-export type Area = "fono" | "fisio" | "teo" | "psico" | "acom" | "inte" | "neuro"
-export type City = "CTG" | "STM" | "NVA"
+// Tipos compartidos con el core (fuente única de verdad)
+export type { Area, City, Day, Schedule, TimeRange } from "@core/types/base"

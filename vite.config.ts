@@ -8,6 +8,8 @@ export default defineConfig({
       resolve: {
             alias: {
                   '@' : path.resolve(import.meta.dirname, './src/frontend'),
+                  '@core' : path.resolve(import.meta.dirname, './src/core'),
+                  '@data' : path.resolve(import.meta.dirname, './src/data'),
             },
       }
 })

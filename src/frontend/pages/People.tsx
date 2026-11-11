@@ -1,7 +1,7 @@
 import AppButton from "@/components/ui/AppButton"
 import PeopleLister from "@/components/people/PeopleLister";
 import { PersonCardProps } from "@/components/people/PersonCard";
-import { Patients, Therapists } from "@/data/data";
+import { Patients, Therapists } from "@data/data";
 import { toTitleCase } from "@/utils/toTitleCase";
 import { useDeferredValue, useMemo, useState } from "react"
 import AppInput from "@/components/ui/AppInput";

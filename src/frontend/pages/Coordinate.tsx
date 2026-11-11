@@ -1,11 +1,13 @@
 import AppButton from "@/components/ui/AppButton"
 import PatientPicker, { PickedPatient } from "@/components/coordinate/PatientPicker";
 import { City } from "@/types/shared";
-import TherapistPicker, { PickedTherapist } from "@/components/coordinate/TherapistPicker";
+import TherapistPicker, { PickedTherapist, pickedTherapistsById } from "@/components/coordinate/TherapistPicker";
 import { Check, Plus, RotateCw, Sparkles, UserCheck } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CONFIG, suggestTherapists } from "@core/index";
+import { Patients, Therapists } from "@data/data";
 
-const MAX_THERAPISTS = 4;
+const MAX_THERAPISTS = CONFIG.PatientRelated.maxTherapists;
 const ROW_HEIGHT = 56;   // alto de la fila superior del paciente y de cada slot, para que la primera curva sea recta
 const ORIGIN_GAP = 10;  // separación entre el paciente y el punto donde nacen las curvas
 
@@ -87,6 +89,24 @@ export default function CoordinateView() {
             setToast({ text: `${n === 1 ? "Terapeuta asignado" : `${n} terapeutas asignados`}${who}` });
       };
 
+      // Asignar Automáticamente: el core elige los terapeutas que mejor cubren los horarios del paciente
+      const autoAssign = () => {
+            const patientData = patient && Patients.find((p) => p.id === patient.id);
+            if (!patientData) return;
+
+            const suggested = suggestTherapists(patientData, Therapists);
+            if (suggested.length === 0) {
+                  setToast({ text: "Ningún terapeuta de la ciudad comparte horario con el paciente" });
+                  return;
+            }
+
+            const picks = suggested.map((t) => pickedTherapistsById.get(t.id)!);
+            setAssigned([...picks, ...emptyAssigned().slice(picks.length)]);
+            setLocked(emptyLocked());
+            setSlotCount(picks.length);
+            setToast({ text: `${picks.length === 1 ? "Terapeuta sugerido" : `${picks.length} terapeutas sugeridos`} para ${patient.fullName}` });
+      };
+
       const changeCity = (city: City) => {
             setActiveCity(city);
             // paciente y terapeutas pertenecen a la ciudad seleccionada
@@ -160,7 +180,7 @@ export default function CoordinateView() {
 
                         {patient && (
                               <div className="ml-auto animate-[patient-in_200ms_ease-out]">
-                                    <AppButton variant="secondary" icon={Sparkles} iconSize={16} text="Asignar Automáticamente" textClassName="@max-xl:hidden" />
+                                    <AppButton variant="secondary" icon={Sparkles} iconSize={16} text="Asignar Automáticamente" textClassName="@max-xl:hidden" onClick={autoAssign} />
                               </div>
                         )}
                   </div>

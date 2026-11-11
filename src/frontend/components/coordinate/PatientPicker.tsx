@@ -5,7 +5,7 @@ import AreaBadge from "../ui/AreaBadge";
 import PersonAvatar from "../people/PersonAvatar";
 import PersonDropdown from "./PersonDropdown";
 import { Area, City } from "@/types/shared";
-import { Patients } from "@/data/data";
+import { Patients } from "@data/data";
 import { toTitleCase } from "@/utils/toTitleCase";
 import { useDismiss } from "@/hooks/useDismiss";
 

@@ -4,7 +4,7 @@ import AppButton from "../ui/AppButton";
 import PersonAvatar from "../people/PersonAvatar";
 import PersonDropdown from "./PersonDropdown";
 import { City } from "@/types/shared";
-import { Therapists } from "@/data/data";
+import { Therapists } from "@data/data";
 import { toTitleCase } from "@/utils/toTitleCase";
 import { useDismiss } from "@/hooks/useDismiss";
 
@@ -14,6 +14,7 @@ const therapists = Therapists.map((t) => ({
       city: t.city,
 }));
 export type PickedTherapist = (typeof therapists)[number];
+export const pickedTherapistsById = new Map(therapists.map((t) => [t.id, t]));
 
 type TherapistPickerProps = {
       city: City

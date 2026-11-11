@@ -1,6 +1,6 @@
 import { LucideIcon } from "lucide-react";
 
-type AppButtonVariant = "primary" | "secondary" | "ghost" | "icon-only";
+type AppButtonVariant = "primary" | "secondary" | "ghost" | "tertiary" | "icon-only";
 
 export type AppButtonProps = {
       variant?: AppButtonVariant;
@@ -21,6 +21,7 @@ const variantMap: Record<AppButtonVariant, string> = {
       secondary   : "shadow-sm bg-paper text-ink-700 rounded-3xl font-normal hover:bg-ink-200 px-5 font-sans tracking-wide",
       "icon-only" : "shadow-sm rounded-3xl bg-paper text-ink-700 hover:bg-ink-950 hover:text-ink-50 shadow-xl",
       ghost       : "bg-transparent text-ink-500 hover:bg-ink-800/10 rounded-full inset-shadow-sm inset-shadow-ink-200 shadow-md shadow-neutral-50",
+      tertiary    : "bg-transparent shadow-none! rounded-md text-ink-500 hover:text-ink-950 hover:bg-ink-800/10",
 };
 
 export default function AppButton(props: AppButtonProps) {
@@ -30,7 +31,7 @@ export default function AppButton(props: AppButtonProps) {
                   <button
                         type="button"
                         onClick={props.onClick}
-                        aria-label={props.variant === "icon-only" ?  props.tooltip : props.text}
+                        aria-label={props.variant === "icon-only" || !props.text ?  props.tooltip : props.text}
                         className={`font-medium transition-colors p-3 flex items-center cursor-pointer justify-center gap-3 leading-none ${props.active ? "bg-ink-950! text-ink-50!" : ""} ${variantMap[props.variant ?? "secondary"]} ${props.className ?? ""}`}
                   >
                         {props.icon && <props.icon size={props.iconSize ?? 32} strokeWidth={1.5} className="shrink-0" />}

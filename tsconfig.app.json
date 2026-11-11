@@ -17,8 +17,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/frontend/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src/frontend"]
 }

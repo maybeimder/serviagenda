@@ -37,7 +37,7 @@ export default function AreaBadge({ area, value, showLabel }: AreaBadgeProps) {
 
       return (
             <div
-                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-medium bg-neutral-50`}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-medium bg-transparent`}
             >
                   <areaConfig.icon size={12} color={areaConfig.color} />
                   {showLabel && <p className="truncate text-ink-600">{AREA_LABEL[area]}</p>}

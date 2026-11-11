@@ -1,5 +1,5 @@
 import { Area, City } from "@/types/shared"
-import { nameToHslGradient } from "@/utils/nameToHSL"
+import PersonAvatar from "./PersonAvatar"
 import AppButton from "../ui/AppButton"
 import { ChevronRight, MapPin, Pencil, User } from "lucide-react"
 import { memo, useRef } from "react"
@@ -16,17 +16,10 @@ export type PersonCardProps = {
 function PersonCard({ person }: { person: PersonCardProps }) {
       const badgesRef = useRef<HTMLDivElement>(null);
       useAnimateReflow(badgesRef);
-      const parts = person.fullName.trim().split(/\s+/);
-      const initials = `${parts[0]?.[0] ?? ""}${parts.length > 2 ? parts[2]?.[0] : (parts[1]?.[0] ?? "")}`;
 
       return (
-            <div className="@container relative w-full min-w-70 flex items-start px-4 pt-6 pb-9 gap-3 rounded-xl shadow-md inset-shadow-[0_4px_4px_var(--color-highlight)]">
-                  <div
-                        style={{ background: nameToHslGradient(person.fullName) }}
-                        className="rounded-full w-12 h-12 shrink-0 flex items-center justify-center text-lg text-neutral-50"
-                  >
-                        {initials}
-                  </div>
+            <div className="@container relative w-full min-w-70 flex items-start px-4 pt-6 pb-9 gap-3 rounded-xl inset-shadow-sm inset-shadow-white/5 shadow-md ">
+                  <PersonAvatar fullName={person.fullName} />
 
                   <div className="flex-1 min-w-0 flex flex-col gap-2">
                         <div className="flex items-center gap-2 min-w-0 pr-8">

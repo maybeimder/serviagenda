@@ -17,10 +17,10 @@ export type AppButtonProps = {
 };
 
 const variantMap: Record<AppButtonVariant, string> = {
-      primary     : "bg-ink-900 text-neutral-50 rounded-3xl font-normal hover:bg-ink-800 px-5 font-sans tracking-wide",
-      secondary   : "bg-paper text-ink-700 rounded-3xl font-normal hover:bg-ink-200 px-5 font-sans tracking-wide",
-      "icon-only" : "rounded-3xl bg-paper text-ink-700 hover:bg-ink-950 hover:text-ink-50 shadow-xl",
-      ghost       : "bg-transparent text-amber-600 hover:bg-amber-100",
+      primary     : "shadow-sm bg-ink-900 text-neutral-50 rounded-3xl font-normal hover:bg-ink-800 px-5 font-sans tracking-wide",
+      secondary   : "shadow-sm bg-paper text-ink-700 rounded-3xl font-normal hover:bg-ink-200 px-5 font-sans tracking-wide",
+      "icon-only" : "shadow-sm rounded-3xl bg-paper text-ink-700 hover:bg-ink-950 hover:text-ink-50 shadow-xl",
+      ghost       : "bg-transparent text-ink-500 hover:bg-ink-800/10 rounded-full inset-shadow-sm inset-shadow-ink-200 shadow-md shadow-neutral-50",
 };
 
 export default function AppButton(props: AppButtonProps) {
@@ -31,7 +31,7 @@ export default function AppButton(props: AppButtonProps) {
                         type="button"
                         onClick={props.onClick}
                         aria-label={props.variant === "icon-only" ?  props.tooltip : props.text}
-                        className={`font-medium transition-colors p-3 flex shadow-sm items-center cursor-pointer justify-center gap-3 leading-none ${props.active ? "bg-ink-950! text-ink-50!" : ""} ${variantMap[props.variant ?? "secondary"]} ${props.className ?? ""}`}
+                        className={`font-medium transition-colors p-3 flex items-center cursor-pointer justify-center gap-3 leading-none ${props.active ? "bg-ink-950! text-ink-50!" : ""} ${variantMap[props.variant ?? "secondary"]} ${props.className ?? ""}`}
                   >
                         {props.icon && <props.icon size={props.iconSize ?? 32} strokeWidth={1.5} className="shrink-0" />}
                         {props.variant !== "icon-only" && props.text && <span className={`whitespace-nowrap ${props.textClassName ?? ""}`}>{props.text}</span>}

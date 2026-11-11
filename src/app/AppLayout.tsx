@@ -1,7 +1,7 @@
 import { Outlet, useMatches } from "react-router";
 import Sidebar from "@/components/ui/Sidebar";
 import AppButton from "@/components/ui/AppButton";
-import { Moon, Sun } from "lucide-react";
+import { LucideIcon, Moon, Sun } from "lucide-react";
 import { useDarkMode } from "@/hooks/useTheme";
 
 export default function AppLayout() {
@@ -9,6 +9,7 @@ export default function AppLayout() {
       const matches = useMatches();
       const currentMatch = matches[matches.length - 1];
       const title = (currentMatch?.handle as { title?: string })?.title;
+      const Icon  = (currentMatch?.handle as { icon?: LucideIcon })?.icon;
 
       return (
             <div className="flex relative w-full h-screen bg-neutral-100 px-8 py-16 gap-16 font-sans">
@@ -24,7 +25,11 @@ export default function AppLayout() {
 
                   <main className="flex-1 min-w-0 min-h-0 flex flex-col">
                         <div className="flex-1 min-h-0 w-full gap-2 flex flex-col">
-                              {title && (<h1 className="text-3xl font-semibold text-ink-700">{title}</h1>)}
+                              {title && (
+                                    <span className="flex gap-4 items-center">
+                                          {Icon && <Icon className="text-ink-700" size={28} />}
+                                          <h1 className="text-3xl font-semibold text-ink-700">{title}</h1>
+                                    </span>)}
                               <div className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden"> <Outlet/></div>
                         </div>
                   </main>

@@ -14,12 +14,24 @@ export const AREA_ICON_BY_CODE: Record<
       teo: { icon: SportShoe, color: "#FF6600" },
 };
 
+export const AREA_LABEL: Record<Area, string> = {
+      fono: "Fonoaudiología",
+      acom: "Acompañamiento",
+      fisio: "Fisioterapia",
+      inte: "Integración sensorial",
+      neuro: "Neuropsicología",
+      psico: "Psicología",
+      teo: "Terapia ocupacional",
+};
+
 export type AreaBadgeProps = {
       area: Area;
       value: number;
+      /** Muestra el nombre del área junto al valor */
+      showLabel?: boolean;
 };
 
-export default function AreaBadge({ area, value }: AreaBadgeProps) {
+export default function AreaBadge({ area, value, showLabel }: AreaBadgeProps) {
       const areaConfig = AREA_ICON_BY_CODE[area];
       if (!areaConfig) return null;
 
@@ -28,7 +40,8 @@ export default function AreaBadge({ area, value }: AreaBadgeProps) {
                   className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-medium bg-neutral-50`}
             >
                   <areaConfig.icon size={12} color={areaConfig.color} />
-                  <p>{`${value}`}</p>
+                  {showLabel && <p className="truncate text-ink-600">{AREA_LABEL[area]}</p>}
+                  <p className={showLabel ? "ml-auto" : ""}>{`${value}`}</p>
             </div>
       );
 }

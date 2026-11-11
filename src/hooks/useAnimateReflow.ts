@@ -1,13 +1,15 @@
 import { useEffect } from "react"
+import { useLowMotion } from "./useLowMotion"
 
 // Anima (FLIP) los hijos directos del contenedor cuando cambian de posición por un reflow
 // (wrap de badges, cambio de columnas de una grilla, etc). El contenedor debe ser `relative`.
 // Solo anima los hijos visibles en el viewport del contenedor, y lee todas las posiciones
 // antes de animar para no forzar reflows intercalados.
 export function useAnimateReflow(ref: React.RefObject<HTMLElement | null>) {
+      const [lowMotion] = useLowMotion();
       useEffect(() => {
             const container = ref.current;
-            if (!container) return;
+            if (!container || lowMotion) return;
             const prev = new Map<Element, { x: number; y: number }>();
 
             const snapshot = () => {
@@ -38,5 +40,5 @@ export function useAnimateReflow(ref: React.RefObject<HTMLElement | null>) {
             const observer = new ResizeObserver(snapshot);
             observer.observe(container);
             return () => observer.disconnect();
-      }, [ref]);
+      }, [ref, lowMotion]);
 }

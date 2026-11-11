@@ -17,7 +17,50 @@
       }
 }
 
-@theme inline {
+/* Modo bajas animaciones (ver hooks/useLowMotion.ts) */
+html[data-low-motion] *,
+html[data-low-motion] *::before,
+html[data-low-motion] *::after {
+      transition: none !important;
+      animation: none !important;
+}
+
+/* Modo oscuro: se activa con la clase .dark en <html> (ver hooks/useTheme.ts) y reasigna la paleta. */
+html.dark {
+      color-scheme: dark;
+
+      --color-paper: oklch(30% 0.01 247.8);
+      --color-highlight: oklch(100% 0 0 / 0.08);
+
+      --color-neutral-50: oklch(24% 0.008 247.8);
+      --color-neutral-100: oklch(19% 0.008 247.8);
+      --color-neutral-200: oklch(30% 0.01 247.8);
+      --color-neutral-300: oklch(38% 0.012 247.8);
+      --color-neutral-400: oklch(60.2% 0.023 247.8);
+      --color-neutral-500: oklch(69.6% 0.022 247.8);
+      --color-neutral-600: oklch(75.1% 0.02 247.8);
+      --color-neutral-700: oklch(83.9% 0.014 247.8);
+      --color-neutral-800: oklch(90.7% 0.008 247.8);
+      --color-neutral-900: oklch(95.8% 0.004 247.8);
+      --color-neutral-950: oklch(98.5% 0.002 247.8);
+
+      --color-ink-50: oklch(16.8% 0.004 264.4);
+      --color-ink-100: oklch(30.5% 0.007 264.4);
+      --color-ink-200: oklch(36.3% 0.008 264.4);
+      --color-ink-300: oklch(45.1% 0.01 264.4);
+      --color-ink-400: oklch(53.8% 0.011 264.4);
+      --color-ink-500: oklch(64.7% 0.011 264.4);
+      --color-ink-600: oklch(70.9% 0.01 264.4);
+      --color-ink-700: oklch(81.1% 0.007 264.4);
+      --color-ink-800: oklch(88.8% 0.004 264.4);
+      --color-ink-900: oklch(94.6% 0.002 264.4);
+      --color-ink-950: oklch(97.7% 0.001 264.4);
+}
+
+@theme {
+      --color-paper: #fff;
+      --color-highlight: #fff;
+
       --font-sans: "Inter", sans-serif;
       --font-serif: "Fraunces", serif;
       --font-display: "Nunito", sans-serif;

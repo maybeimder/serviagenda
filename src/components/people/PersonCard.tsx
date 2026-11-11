@@ -1,8 +1,8 @@
-﻿import { Area, City } from "@/types/shared"
-import { nameToHslColor, nameToHslGradient } from "@/utils/nameToHSL"
+import { Area, City } from "@/types/shared"
+import { nameToHslGradient } from "@/utils/nameToHSL"
 import AppButton from "../ui/AppButton"
 import { ChevronRight, MapPin, Pencil, User } from "lucide-react"
-import { useRef } from "react"
+import { memo, useRef } from "react"
 import { useAnimateReflow } from "@/hooks/useAnimateReflow"
 import AreaBadge from "../ui/AreaBadge";
 
@@ -13,14 +13,14 @@ export type PersonCardProps = {
       authorizations?: Partial<Record<Area, number>>
 }
 
-export default function PersonCard({ person }: { person: PersonCardProps }) {
+function PersonCard({ person }: { person: PersonCardProps }) {
       const badgesRef = useRef<HTMLDivElement>(null);
       useAnimateReflow(badgesRef);
       const parts = person.fullName.trim().split(/\s+/);
       const initials = `${parts[0]?.[0] ?? ""}${parts.length > 2 ? parts[2]?.[0] : (parts[1]?.[0] ?? "")}`;
 
       return (
-            <div className="@container relative [content-visibility:auto] [contain-intrinsic-size:auto_130px] w-full min-w-70 flex items-start px-4 pt-6 pb-9 gap-3 rounded-xl shadow-md inset-shadow-[0_4px_4px_white]">
+            <div className="@container relative w-full min-w-70 flex items-start px-4 pt-6 pb-9 gap-3 rounded-xl shadow-md inset-shadow-[0_4px_4px_var(--color-highlight)]">
                   <div
                         style={{ background: nameToHslGradient(person.fullName) }}
                         className="rounded-full w-12 h-12 shrink-0 flex items-center justify-center text-lg text-neutral-50"
@@ -59,7 +59,7 @@ export default function PersonCard({ person }: { person: PersonCardProps }) {
                         />
                   </div>
 
-                  <div className="absolute bottom-2 right-2 z-10 flex items-center rounded-full overflow-hidden bg-white shadow-sm text-xs">
+                  <div className="absolute bottom-2 right-2 z-10 flex items-center rounded-full overflow-hidden bg-paper shadow-sm text-xs">
                         <div className="flex items-center gap-1 pl-2.5 pr-0.5 py-1 text-ink-700 @max-xs:px-2">
                               <User size={16} strokeWidth={1.5} />
                               <span className="@max-xs:hidden">3</span>
@@ -76,3 +76,5 @@ export default function PersonCard({ person }: { person: PersonCardProps }) {
             </div>
       );
 }
+
+export default memo(PersonCard);

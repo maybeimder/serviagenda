@@ -10,7 +10,7 @@ import { City } from "@/types/shared";
 import { ArrowDownWideNarrow, Filter, Zap, ZapOff } from "lucide-react";
 import { useLowMotion } from "@/hooks/useLowMotion";
 
-type Tab = "patients" | "therapists";
+export type Tab = "patients" | "therapists";
 
 const patients: PersonCardProps[] = Patients.map((p) => ({
       id: p.id,

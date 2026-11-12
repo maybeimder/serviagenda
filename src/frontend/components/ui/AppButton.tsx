@@ -12,6 +12,8 @@ export type AppButtonProps = {
       className?: string
       iconSize?: number
       textClassName?: string
+      /** Texto corto que reemplaza a `text` cuando el contenedor (@container) mide menos de 1000px */
+      shortText?: string
 
       onClick?: () => void ;
 };
@@ -35,7 +37,12 @@ export default function AppButton(props: AppButtonProps) {
                         className={`font-medium transition-colors p-3 flex items-center cursor-pointer justify-center gap-3 leading-none ${props.active ? "bg-ink-950! text-ink-50!" : ""} ${variantMap[props.variant ?? "secondary"]} ${props.className ?? ""}`}
                   >
                         {props.icon && <props.icon size={props.iconSize ?? 32} strokeWidth={1.5} className="shrink-0" />}
-                        {props.variant !== "icon-only" && props.text && <span className={`whitespace-nowrap ${props.textClassName ?? ""}`}>{props.text}</span>}
+                        {props.variant !== "icon-only" && props.text && (
+                              <span className={`whitespace-nowrap ${props.shortText ? "@max-[1000px]:hidden" : ""} ${props.textClassName ?? ""}`}>{props.text}</span>
+                        )}
+                        {props.variant !== "icon-only" && props.shortText && (
+                              <span className="hidden whitespace-nowrap @max-[1000px]:inline">{props.shortText}</span>
+                        )}
                   </button>
 
                   {props.tooltip && (

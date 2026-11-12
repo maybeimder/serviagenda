@@ -148,13 +148,11 @@ export default function CoordinateView() {
 
       return (
             <div className="w-full h-full flex flex-col py-8.5 gap-6">
-                  {/* Al fijar un terapeuta se oscurece el fondo; paciente, terapeutas y líneas quedan por encima (z-30) */}
                   <div
                         aria-hidden
                         className={`fixed inset-0 z-20 bg-black/40 pointer-events-none transition-opacity duration-500 ${dimmed ? "opacity-100" : "opacity-0"}`}
                   />
 
-                  {/* Toast de confirmación: arriba al centro, colores invertidos respecto al tema (oscuro en claro y viceversa) */}
                   {toast && (
                         <div
                               role="status"
@@ -165,7 +163,6 @@ export default function CoordinateView() {
                         </div>
                   )}
 
-                  {/* "Asignar Terapeutas": abajo a la derecha, solo cuando todos los terapeutas puestos están fijados */}
                   <div className="fixed bottom-8 right-8 z-30 flex flex-col items-end gap-3">
                         {allLocked && (
                               <div className="animate-[patient-in_200ms_ease-out]">

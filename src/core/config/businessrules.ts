@@ -1,10 +1,8 @@
 export const CONFIG = {
       SessionDuration: 0.5,
 
-      /** hueco mínimo entre dos sesiones de un mismo terapeuta en lugares distintos (sede <-> casa, casa de A <-> casa de B) */
       TravelMinutes: 30,
 
-      /** los requerimientos de los pacientes son mensuales; se planifican semana a semana */
       WeeksPerMonth: 4,
 
       PatientRelated: {

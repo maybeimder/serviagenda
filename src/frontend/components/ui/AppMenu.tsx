@@ -10,9 +10,11 @@ type AppMenuProps<T extends string> = Omit<AppButtonProps, "onClick" | "active">
       onSelect: (value: T) => void
       /** Resalta el botón cuando hay una opción distinta a la de reposo seleccionada */
       active?: boolean
+      /** Lado del botón al que se alinea el menú */
+      align?: "left" | "right"
 };
 
-export default function AppMenu<T extends string>({ options, value, onSelect, active, ...buttonProps }: AppMenuProps<T>) {
+export default function AppMenu<T extends string>({ options, value, onSelect, active, align = "left", ...buttonProps }: AppMenuProps<T>) {
       const [open, setOpen] = useState(false);
       const ref = useRef<HTMLDivElement>(null);
 
@@ -32,7 +34,7 @@ export default function AppMenu<T extends string>({ options, value, onSelect, ac
             <div ref={ref} className="relative">
                   <AppButton {...buttonProps} active={active || open} onClick={() => setOpen((o) => !o)} />
                   {open && (
-                        <ul role="menu" className="absolute left-0 top-full mt-2 z-30 min-w-40 bg-paper text-ink-700 rounded-xl shadow-xl py-1 text-sm">
+                        <ul role="menu" className={`absolute ${align === "right" ? "right-0" : "left-0"} top-full mt-2 z-40 min-w-40 bg-paper text-ink-700 rounded-xl shadow-xl py-1 text-sm`}>
                               {options.map((o) => (
                                     <li key={o.value} role="menuitemradio" aria-checked={o.value === value}>
                                           <button

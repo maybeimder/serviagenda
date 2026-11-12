@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Building2, CalendarPlus, Clock, Home, Pencil, Shuffle, Trash, UserPlus } from "lucide-react";
 import { Area, Day, TimeRange } from "@core/types/base";
 import { Patient, Session } from "@core/types/dtos";
@@ -90,6 +90,34 @@ function barBackground(s: Session): string {
       return `linear-gradient(to bottom, ${colors.map((c, i) => `${c} ${i * step}% ${(i + 1) * step}%`).join(", ")})`;
 }
 
+/**
+ * Bloque: sesiones de 30 min contiguas de un mismo día que se dibujan (y se seleccionan y mueven) como una sola.
+ * Se unen si son del mismo terapeuta y modo, y atienden a los mismos pacientes con las mismas áreas.
+ */
+type SessionBlock = { ids: string[], sessions: Session[], start: number, end: number };
+
+const blockKey = (s: Session) =>
+      `${s.therapist.id}|${s.atHome}|${s.patient.map((p) => `${p.id}:${s.areaPerPatient[p.id]}`).sort().join(",")}`;
+
+/** Agrupa las sesiones de un día en bloques (una sesión que empieza justo cuando termina otra igual la continúa). */
+function blocksOfDay(daySessions: Session[]): SessionBlock[] {
+      const sorted = [...daySessions].sort((a, b) => toMins(a.schedule.start) - toMins(b.schedule.start));
+      const open = new Map<string, SessionBlock>(); // clave -> bloque que sigue creciendo
+      const blocks: SessionBlock[] = [];
+
+      for (const s of sorted) {
+            const key = blockKey(s), start = toMins(s.schedule.start), end = toMins(s.schedule.end);
+            const block = open.get(key);
+            if (block && block.end === start) { block.ids.push(s.id); block.sessions.push(s); block.end = end; }
+            else {
+                  const created = { ids: [s.id], sessions: [s], start, end };
+                  open.set(key, created);
+                  blocks.push(created);
+            }
+      }
+      return blocks;
+}
+
 /** Las sesiones cruzadas no llevan nombre: "Cruzada (nº de pacientes)", sin importar desde quién se mira. */
 function sessionLabel(s: Session, perspective: "patient" | "therapist") {
       if (s.crossed) return `Cruzada (${s.patient.length})`;
@@ -99,28 +127,38 @@ function sessionLabel(s: Session, perspective: "patient" | "therapist") {
 const toAssignable = (p: Patient): AssignablePatient =>
       ({ id: p.id, fullName: toTitleCase(p.name), authorizations: p.sessionsRequirements });
 
-/** Tarjeta sobria de una sesión: fondo neutral y barra de color del área a la izquierda. */
-function SessionCard({ session: s, perspective, className = "", style, selected, ...handlers }: {
-      session: Session
+/**
+ * Tarjeta sobria de un bloque de sesiones (una o varias contiguas e iguales): fondo neutral y barra de color del
+ * área a la izquierda. Una sesión suelta de 30 min muestra solo ícono y nombre; un bloque (o una sesión más larga)
+ * muestra ícono, hora de inicio, casa y el nombre debajo.
+ */
+function BlockCard({ sessions: group, perspective, className = "", style, selectedIds, ...handlers }: {
+      sessions: Session[]
       perspective: "patient" | "therapist"
       className?: string
       style?: React.CSSProperties
-      /** Sesión con su menú abierto */
-      selected?: boolean
+      /** Sesiones seleccionadas: todas = anillo al bloque; algunas = anillo solo en esos fragmentos de 30 min */
+      selectedIds?: ReadonlySet<string>
       onMouseDown?: (e: React.MouseEvent) => void
+      onDoubleClick?: (e: React.MouseEvent) => void
       onContextMenu?: (e: React.MouseEvent) => void
       onMouseEnter?: (e: React.MouseEvent) => void
       onMouseLeave?: (e: React.MouseEvent) => void
 }) {
-      const start = toMins(s.schedule.start), end = toMins(s.schedule.end);
+      const s = group[0];
+      const start = toMins(s.schedule.start), end = toMins(group[group.length - 1].schedule.end);
       const Icon = s.crossed ? Shuffle : AREA_ICON_BY_CODE[areasOf(s)[0]].icon;
+
+      const picked = group.flatMap((x, i) => selectedIds?.has(x.id) ? [i] : []);
+      const whole = picked.length === group.length;
+
       return (
             <div
                   // Las cruzadas tienen su propio tooltip con los pacientes
                   title={s.crossed ? undefined : `${formatTime(start)} - ${formatTime(end)} · ${sessionLabel(s, perspective)}`}
                   style={style}
                   {...handlers}
-                  className={`overflow-hidden rounded-md bg-neutral-50 ${selected ? "ring-2 ring-violet-400" : ""} ${className}`}
+                  className={`overflow-hidden rounded-md bg-neutral-50 ${whole ? "ring-2 ring-violet-400" : ""} ${className}`}
             >
                   <span className="absolute inset-y-0 left-0 w-2" style={{ background: barBackground(s) }} />
                   {end - start <= SLOT_MINS ? (
@@ -130,15 +168,24 @@ function SessionCard({ session: s, perspective, className = "", style, selected,
                               <span className="truncate font-medium text-ink-900">{sessionLabel(s, perspective)}</span>
                         </div>
                   ) : (
-                        <div className="h-full pl-4.5 pr-1.5 flex flex-col items-start justify-center gap-1 text-[11px] leading-none text-ink-700 min-w-0">
+                        <div className="h-full pl-4.5 pr-1.5 pt-1.5 flex flex-col items-start justify-start gap-1 text-[11px] leading-none text-ink-700 min-w-0">
                               <div className="flex gap-1 ml-1 w-full">
                                     <Icon size={11} className="shrink-0 text-ink-700" color={s.crossed ? "currentColor" : barBackground(s)} />
-                                    <span className="shrink-0 tabular-nums text-ink-500">{`${formatTime(start)}`}</span>
+                                    <span className="shrink-0 tabular-nums text-ink-500">{formatTime(start)}</span>
                                     {s.atHome && <>·<Home size={10} className="shrink-0 text-ink-800" /></>}
                               </div>
                               <span className="truncate font-medium text-ink-900">{sessionLabel(s, perspective)}</span>
                         </div>
                   )}
+
+                  {/* Fragmentos seleccionados de un bloque (doble clic): anillo solo en esas franjas de 30 min */}
+                  {!whole && picked.map((i) => (
+                        <span
+                              key={i} aria-hidden
+                              style={{ top: `${(i / group.length) * 100}%`, height: `${100 / group.length}%` }}
+                              className="absolute inset-x-0 ring-2 ring-inset ring-violet-400 bg-violet-400/10 pointer-events-none"
+                        />
+                  ))}
             </div>
       );
 }
@@ -181,9 +228,10 @@ function snapSelection(s: Selection, dayCount: number, slotCount: number): Selec
 
 const containsCell = (s: Selection, c: Cell) => c.day >= s.x0 && c.day < s.x1 && c.slot >= s.y0 && c.slot < s.y1;
 
-/** Sesión que se está arrastrando. `target` ya está ajustado (snap) a una celda. */
+/** Lo que se está arrastrando: un bloque entero o un fragmento seleccionado. `target` ya está ajustado (snap) a una celda. */
 type Drag = {
-      id: string
+      ids: string[]                  // sesiones que se mueven
+      unit: Session[]                // esas mismas sesiones, en orden, para dibujar la copia
       colW: number, rowH: number     // tamaño de una celda en px, medido al empezar
       from: Cell, target: Cell
       slots: number                  // duración en slots
@@ -216,7 +264,9 @@ export default function BigCalendar({
       // Un clic fuera del calendario quita la selección (los menús viven dentro del calendario, así que no cuentan como fuera)
       useEffect(() => {
             const clear = (e: MouseEvent) => {
-                  if (!rootRef.current?.contains(e.target as Node)) setSelections((all) => all.length ? [] : all);
+                  if (rootRef.current?.contains(e.target as Node)) return;
+                  setSelections((all) => all.length ? [] : all);
+                  setSelectedIds((ids) => ids.length ? [] : ids);
             };
             document.addEventListener("mousedown", clear);
             return () => document.removeEventListener("mousedown", clear);
@@ -227,14 +277,25 @@ export default function BigCalendar({
       // Varias selecciones (Ctrl + arrastre agrega una); la que se está arrastrando es siempre la última
       const [selections, setSelections] = useState<Selection[]>([]);
       const [menu, setMenu] = useState<{ x: number, y: number } | null>(null);
-      // Menú de una sesión (clic derecho sobre ella) y tooltip de las cruzadas
-      const [sessionMenu, setSessionMenu] = useState<{ x: number, y: number, id: string } | null>(null);
+      // Sesiones seleccionadas: clic = todo su bloque, doble clic = solo el fragmento de 30 min. Son las que se arrastran y editan.
+      const [selectedIds, setSelectedIds] = useState<string[]>([]);
+      const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+      const selectedRef = useRef<string[]>([]);
+      selectedRef.current = selectedIds;
+      // Si las sesiones cambian (editar, eliminar, mover), se descartan de la selección las que ya no existen
+      useEffect(() => {
+            const existing = new Set(sessions.map((s) => s.id));
+            setSelectedIds((ids) => ids.some((id) => !existing.has(id)) ? ids.filter((id) => existing.has(id)) : ids);
+      }, [sessions]);
+
+      // Menú de las sesiones seleccionadas (clic derecho sobre ellas) y tooltip de las cruzadas
+      const [sessionMenu, setSessionMenu] = useState<{ x: number, y: number, ids: string[] } | null>(null);
       const [hovered, setHovered] = useState<{ id: string, rect: DOMRect } | null>(null);
 
       // Arrastre de sesiones: `press` es el clic aún sin mover; `drag` existe una vez pasado el umbral
       const sessionsRef = useRef(sessions);
       sessionsRef.current = sessions;
-      const press = useRef<{ id: string, x: number, y: number } | null>(null);
+      const press = useRef<{ x: number, y: number } | null>(null);
       const [drag, setDrag] = useState<Drag | null>(null);
       const dragRef = useRef<Drag | null>(null);
       dragRef.current = drag;
@@ -261,10 +322,10 @@ export default function BigCalendar({
             slots: Math.max(1, Math.round((toMins(s.schedule.end) - toMins(s.schedule.start)) / SLOT_MINS)),
       }), [baseMins]);
 
-      /** ¿Otra sesión ocupa algo de ese espacio? */
-      const overlaps = useCallback((id: string, cell: Cell, slots: number) =>
+      /** ¿Alguna sesión que no se está moviendo ocupa algo de ese espacio? */
+      const overlaps = useCallback((moving: string[], cell: Cell, slots: number) =>
             sessionsRef.current.some((o) => {
-                  if (o.id === id || WEEK_DAYS.indexOf(o.day) !== cell.day) return false;
+                  if (moving.includes(o.id) || WEEK_DAYS.indexOf(o.day) !== cell.day) return false;
                   const p = placementOf(o);
                   return cell.slot < p.cell.slot + p.slots && cell.slot + slots > p.cell.slot;
             }), [placementOf]);
@@ -288,13 +349,18 @@ export default function BigCalendar({
 
                   if (!current) {
                         if (Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) < DRAG_THRESHOLD) return;
-                        const s = sessionsRef.current.find((x) => x.id === pressed.id);
+                        // Se arrastra lo seleccionado (un bloque o un fragmento): sesiones de un mismo día, contiguas
+                        const unit = sessionsRef.current
+                              .filter((x) => selectedRef.current.includes(x.id))
+                              .sort((a, b) => toMins(a.schedule.start) - toMins(b.schedule.start));
                         const rect = daysRef.current?.getBoundingClientRect();
-                        if (!s || !rect) return;
-                        const { cell, slots } = placementOf(s);
+                        if (unit.length === 0 || !rect) return;
+                        const first = placementOf(unit[0]), last = placementOf(unit[unit.length - 1]);
+                        const slots = last.cell.slot + last.slots - first.cell.slot;
                         setDrag({
-                              id: s.id, colW: rect.width / dayCount, rowH: rect.height / slotCount,
-                              from: cell, target: cell, slots, valid: true, lifted: false, settling: false,
+                              ids: unit.map((x) => x.id), unit,
+                              colW: rect.width / dayCount, rowH: rect.height / slotCount,
+                              from: first.cell, target: first.cell, slots, valid: true, lifted: false, settling: false,
                         });
                         // Un frame después se "levanta": la transición de escala y sombra queda animada
                         requestAnimationFrame(() => setDrag((d) => d && { ...d, lifted: true }));
@@ -306,7 +372,7 @@ export default function BigCalendar({
                   const slot = Math.max(0, Math.min(slotCount - current.slots, current.from.slot + Math.round((e.clientY - pressed.y) / current.rowH)));
                   if (day === current.target.day && slot === current.target.slot) return; // sin cambio de celda: sin render
                   const target = { day, slot };
-                  setDrag({ ...current, target, valid: !overlaps(current.id, target, current.slots) });
+                  setDrag({ ...current, target, valid: !overlaps(current.ids, target, current.slots) });
             };
 
             const up = () => {
@@ -323,8 +389,13 @@ export default function BigCalendar({
 
                   const moved = current.valid && (current.target.day !== current.from.day || current.target.slot !== current.from.slot);
                   if (moved) {
-                        const start = baseMins + current.target.slot * SLOT_MINS;
-                        onMoveSession?.(current.id, WEEK_DAYS[current.target.day], { start: minsToTime(start), end: minsToTime(start + current.slots * SLOT_MINS) });
+                        // Cada sesión conserva su lugar dentro del bloque: se mueven todas el mismo desplazamiento
+                        const deltaMins = (current.target.slot - current.from.slot) * SLOT_MINS;
+                        for (const s of current.unit)
+                              onMoveSession?.(s.id, WEEK_DAYS[current.target.day], {
+                                    start: minsToTime(toMins(s.schedule.start) + deltaMins),
+                                    end: minsToTime(toMins(s.schedule.end) + deltaMins),
+                              });
                   }
                   // Se suelta: vuelve a tamaño normal en su destino (o regresa al origen si no era válido)
                   setDrag({ ...current, target: moved ? current.target : current.from, valid: true, lifted: false, settling: true });
@@ -340,6 +411,7 @@ export default function BigCalendar({
             if (e.button !== 0) return;
             setMenu(null);
             setSessionMenu(null);
+            setSelectedIds([]); // una celda vacía deja de tener seleccionadas las sesiones
             const cell = cellAt(e.clientX, e.clientY);
             const first: Selection = { x0: cell.day, x1: cell.day + 1, y0: cell.slot, y1: cell.slot + 1 };
             // Ctrl (o Cmd) + arrastre agrega otra selección; sin Ctrl se reemplazan todas
@@ -349,23 +421,37 @@ export default function BigCalendar({
       };
 
       // Una sesión tiene prioridad sobre la celda: un clic sobre ella nunca inicia una selección
-      const onSessionMouseDown = (e: React.MouseEvent, id: string) => {
+      // Clic sobre una sesión: selecciona todo su bloque (si ya era parte de la selección, la conserva, p. ej. un fragmento).
+      // Con la selección hecha se puede arrastrar de inmediato.
+      const onSessionMouseDown = (e: React.MouseEvent, block: SessionBlock) => {
             if (e.button !== 0) return;
             e.stopPropagation();
             setMenu(null);
             setSessionMenu(null);
             setHovered(null);
-            if (onMoveSession) press.current = { id, x: e.clientX, y: e.clientY };
+            setSelections([]);
+            if (!block.ids.some((id) => selectedSet.has(id))) setSelectedIds(block.ids);
+            if (onMoveSession) press.current = { x: e.clientX, y: e.clientY };
       };
 
-      const onSessionContextMenu = (e: React.MouseEvent, id: string) => {
+      // Doble clic: solo el fragmento de 30 min bajo el puntero
+      const onSessionDoubleClick = (e: React.MouseEvent, block: SessionBlock) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const index = Math.min(block.sessions.length - 1, Math.max(0, Math.floor(((e.clientY - rect.top) / rect.height) * block.sessions.length)));
+            setSelectedIds([block.sessions[index].id]);
+      };
+
+      const onSessionContextMenu = (e: React.MouseEvent, block: SessionBlock) => {
             e.preventDefault();
             e.stopPropagation(); // no abre el menú de celdas
             if (!onEditSessionPatients && !onSetSessionAtHome && !onDeleteSession) return;
+            // El menú es de lo seleccionado; si se hace clic derecho fuera de la selección, se selecciona ese bloque
+            const ids = block.ids.some((id) => selectedSet.has(id)) ? selectedIds : block.ids;
+            setSelectedIds(ids);
             setSelections([]);
             setMenu(null);
             setHovered(null);
-            setSessionMenu({ x: e.clientX, y: e.clientY, id });
+            setSessionMenu({ x: e.clientX, y: e.clientY, ids });
       };
 
       const onContextMenu = (e: React.MouseEvent) => {
@@ -410,7 +496,7 @@ export default function BigCalendar({
                   } : null;
 
       /** Listas de personas del menú de una sesión, según desde quién se mira. */
-      const sessionPanels = (s: Session): PanelSpec[] => {
+      const sessionPanels = (s: Session, ids: string[]): PanelSpec[] => {
             if (perspective === "patient") {
                   if (!patientFocus) return [];
                   const me = patientFocus.patient;
@@ -430,7 +516,7 @@ export default function BigCalendar({
                         label: "Editar terapeuta", icon: Pencil, submitLabel: "Guardar",
                         patients: [...therapists.values()], initial: [{ id: s.therapist.id, area: myArea }],
                         maxPatients: 1, noun: "terapeuta", searchPlaceholder: "Buscar terapeuta", areaOwner: firstName(me.fullName),
-                        onSubmit: ([pick]) => pick && onEditSessionTherapist?.(s.id, pick.patient.id, pick.area),
+                        onSubmit: ([pick]) => pick && ids.forEach((id) => onEditSessionTherapist?.(id, pick.patient.id, pick.area)),
                   }];
                   // En casa solo cabe un paciente, así que no se pueden sumar otros
                   if (!s.atHome) panels.push({
@@ -438,10 +524,10 @@ export default function BigCalendar({
                         patients: [...others.values()],
                         initial: s.patient.filter((p) => p.id !== me.id).map((p) => ({ id: p.id, area: s.areaPerPatient[p.id] })),
                         maxPatients: MAX_PATIENTS_PER_BLOCK - 1, maxHint: "Máximo 2 además de este paciente",
-                        onSubmit: (entries) => onEditSessionPatients?.(s.id, [
+                        onSubmit: (entries) => ids.forEach((id) => onEditSessionPatients?.(id, [
                               { patientId: me.id, area: myArea },
                               ...entries.map((a) => ({ patientId: a.patient.id, area: a.area })),
-                        ]),
+                        ])),
                   });
                   return panels;
             }
@@ -455,43 +541,49 @@ export default function BigCalendar({
                   initial: s.patient.map((p) => ({ id: p.id, area: s.areaPerPatient[p.id] })),
                   maxPatients: s.atHome ? MAX_PATIENTS_AT_HOME : MAX_PATIENTS_PER_BLOCK,
                   maxHint: s.atHome ? "Sesión en casa: un solo paciente" : undefined,
-                  onSubmit: (entries) => onEditSessionPatients?.(s.id, entries.map((a) => ({ patientId: a.patient.id, area: a.area }))),
+                  onSubmit: (entries) => ids.forEach((id) => onEditSessionPatients?.(id, entries.map((a) => ({ patientId: a.patient.id, area: a.area })))),
             }];
       };
 
-      /** Menú de la sesión con clic derecho: editar, en casa, eliminar. */
+      /** Menú de las sesiones seleccionadas (clic derecho): editar, en casa, eliminar. Se aplica a todas las del bloque o fragmento. */
       const renderSessionMenu = () => {
-            const s = sessionMenu && sessions.find((x) => x.id === sessionMenu.id);
-            if (!sessionMenu || !s) return null;
+            if (!sessionMenu) return null;
+            const ids = sessionMenu.ids;
+            const group = sessions.filter((x) => ids.includes(x.id)).sort((a, b) => toMins(a.schedule.start) - toMins(b.schedule.start));
+            const s = group[0]; // todas comparten terapeuta, pacientes, áreas y modo
+            if (!s) return null;
 
             const actions: MenuAction[] = [];
             if (onSetSessionAtHome) {
-                  if (s.atHome) actions.push({ label: "Quitar sesión en casa", icon: Building2, onClick: () => onSetSessionAtHome(s.id, false) });
+                  if (s.atHome) actions.push({ label: "Quitar sesión en casa", icon: Building2, onClick: () => ids.forEach((id) => onSetSessionAtHome(id, false)) });
                   else if (s.patient.length > MAX_PATIENTS_AT_HOME) actions.push({
                         // En casa solo cabe un paciente: se pregunta con cuál se queda
                         label: "Marcar como sesión en casa",
                         icon: Home,
                         choicesTitle: "¿Con qué paciente queda la sesión?",
                         choices: s.patient.map((p) => ({ id: p.id, label: toTitleCase(p.name) })),
-                        onChoose: (patientId) => onSetSessionAtHome(s.id, true, patientId),
+                        onChoose: (patientId) => ids.forEach((id) => onSetSessionAtHome(id, true, patientId)),
                   });
-                  else actions.push({ label: "Marcar como sesión en casa", icon: Home, onClick: () => onSetSessionAtHome(s.id, true) });
+                  else actions.push({ label: "Marcar como sesión en casa", icon: Home, onClick: () => ids.forEach((id) => onSetSessionAtHome(id, true)) });
             }
-            if (onDeleteSession) actions.push({ label: "Eliminar sesión", icon: Trash, danger: true, onClick: () => onDeleteSession(s.id) });
+            if (onDeleteSession) actions.push({
+                  label: group.length > 1 ? `Eliminar ${group.length} sesiones` : "Eliminar sesión",
+                  icon: Trash, danger: true, onClick: () => ids.forEach((id) => onDeleteSession(id)),
+            });
 
+            const end = toMins(group[group.length - 1].schedule.end);
             return (
                   <SessionContextMenu
-                        key={s.id}
+                        key={ids.join("|")}
                         x={sessionMenu.x} y={sessionMenu.y}
-                        label={`${DAY_SHORT[WEEK_DAYS.indexOf(s.day)]} · ${formatTime(toMins(s.schedule.start))} – ${formatTime(toMins(s.schedule.end))}${s.atHome ? " · en casa" : ""}`}
-                        panels={sessionPanels(s)}
+                        label={`${DAY_SHORT[WEEK_DAYS.indexOf(s.day)]} · ${formatTime(toMins(s.schedule.start))} – ${formatTime(end)}${s.atHome ? " · en casa" : ""}`}
+                        panels={sessionPanels(s, ids)}
                         actions={actions}
                         onClose={() => setSessionMenu(null)}
                   />
             );
       };
 
-      const dragged = drag && sessions.find((s) => s.id === drag.id);
       const movable = !!onMoveSession;
       const hoveredSession = hovered && !drag && !sessionMenu && !isSelecting ? sessions.find((s) => s.id === hovered.id) : undefined;
       /** Caja de una celda/sesión en px (con el mismo margen que las tarjetas dentro de la columna). */
@@ -558,26 +650,26 @@ export default function BigCalendar({
                                                 />
                                           ))}
 
-                                          {/* Sesiones del día, posicionadas por porcentaje del rango visible */}
-                                          {sessions.filter((s) => s.day === day).map((s) => {
-                                                const start = toMins(s.schedule.start), end = toMins(s.schedule.end);
-                                                if (end <= baseMins || start >= baseMins + totalMins) return null;
-                                                const isDragged = drag?.id === s.id;
+                                          {/* Bloques de sesiones del día, posicionados por porcentaje del rango visible */}
+                                          {blocksOfDay(sessions.filter((s) => s.day === day)).map((block) => {
+                                                if (block.end <= baseMins || block.start >= baseMins + totalMins) return null;
+                                                // el bloque que se está arrastrando queda como huella tenue mientras su copia se mueve
+                                                const isDragged = !!drag && block.ids.some((id) => drag.ids.includes(id));
                                                 return (
-                                                      <SessionCard
-                                                            key={s.id}
-                                                            session={s}
+                                                      <BlockCard
+                                                            key={block.ids[0]}
+                                                            sessions={block.sessions}
                                                             perspective={perspective}
-                                                            selected={sessionMenu?.id === s.id}
-                                                            onMouseDown={(e) => onSessionMouseDown(e, s.id)}
-                                                            onContextMenu={(e) => onSessionContextMenu(e, s.id)}
-                                                            onMouseEnter={(e) => s.crossed && setHovered({ id: s.id, rect: e.currentTarget.getBoundingClientRect() })}
+                                                            selectedIds={selectedSet}
+                                                            onMouseDown={(e) => onSessionMouseDown(e, block)}
+                                                            onDoubleClick={(e) => onSessionDoubleClick(e, block)}
+                                                            onContextMenu={(e) => onSessionContextMenu(e, block)}
+                                                            onMouseEnter={(e) => block.sessions[0].crossed && setHovered({ id: block.ids[0], rect: e.currentTarget.getBoundingClientRect() })}
                                                             onMouseLeave={() => setHovered(null)}
                                                             style={{
-                                                                  top: `calc(${((start - baseMins) / totalMins) * 100}% + 1px)`,
-                                                                  height: `calc(${((end - start) / totalMins) * 100}% - 2px)`,
+                                                                  top: `calc(${((block.start - baseMins) / totalMins) * 100}% + 1px)`,
+                                                                  height: `calc(${((block.end - block.start) / totalMins) * 100}% - 2px)`,
                                                             }}
-                                                            // la original queda como huella tenue mientras su copia se arrastra
                                                             className={`absolute inset-x-0.5 shadow-sm transition-opacity duration-150
                                                                   ${movable ? "cursor-grab" : ""} ${isDragged ? (drag.settling ? "opacity-0" : "opacity-30") : ""}`}
                                                       />
@@ -588,7 +680,7 @@ export default function BigCalendar({
 
                               {/* Arrastre: aviso rojo si el destino está ocupado + la copia que sigue al puntero con snap.
                                   Ambos se mueven con transform (acelerado por GPU) y solo se re-renderizan al cambiar de celda. */}
-                              {drag && dragged && (
+                              {drag && (
                                     <>
                                           <div
                                                 aria-hidden
@@ -596,8 +688,8 @@ export default function BigCalendar({
                                                 className={`absolute left-0 top-0 z-20 pointer-events-none rounded-md bg-red-500/25 ring-1 ring-red-500/60 transition-[opacity,transform] duration-150 ease-out
                                                       ${drag.valid ? "opacity-0" : "opacity-100"}`}
                                           />
-                                          <SessionCard
-                                                session={dragged}
+                                          <BlockCard
+                                                sessions={drag.unit}
                                                 perspective={perspective}
                                                 style={{ ...box(drag.target, drag.slots, drag, drag.lifted ? 1.06 : 1), willChange: "transform" }}
                                                 className={`absolute left-0 top-0 z-30 pointer-events-none cursor-grabbing transition-[transform,box-shadow] duration-150 ease-out

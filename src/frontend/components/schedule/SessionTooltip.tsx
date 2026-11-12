@@ -11,8 +11,8 @@ export default function SessionTooltip({ session, anchor }: { session: Session, 
 
       // Se mide antes de pintar para colocarlo donde cabe (arriba de la sesión, o debajo)
       useLayoutEffect(() => {
-            const r = ref.current!.getBoundingClientRect();
-            setPos(placeAbove(anchor, r.width, r.height));
+            // offsetWidth/Height: no incluyen la escala de la animación de entrada
+            setPos(placeAbove(anchor, ref.current!.offsetWidth, ref.current!.offsetHeight));
       }, [anchor]);
 
       return (

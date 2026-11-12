@@ -3,9 +3,10 @@ import PersonAvatar from "./PersonAvatar"
 import AppButton from "../ui/AppButton"
 import { Check, ChevronRight, MapPin, Pencil, User, X } from "lucide-react"
 import { memo, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useAnimateReflow } from "@/hooks/useAnimateReflow"
 import { useDismiss } from "@/hooks/useDismiss"
-import { placeAbove } from "@/utils/placement"
+import { placeBeside } from "@/utils/placement"
 import AreaBadge, { AREA_ICON_BY_CODE, AREA_LABEL } from "../ui/AreaBadge";
 
 export type PersonCardProps = {
@@ -51,30 +52,35 @@ function AreaField({ area, value, onChange }: { area: Area, value: string, onCha
       );
 }
 
-/** Lista de nombres de los terapeutas/pacientes asociados, junto al botón; se coloca donde cabe en la ventana. */
-function RelatedPopover({ title, names, anchor }: { title: string, names: string[], anchor: DOMRect }) {
-      const ref = useRef<HTMLDivElement>(null);
+/**
+ * Lista de nombres de los terapeutas/pacientes asociados, al lado del botón y dentro de la ventana. Va en un portal:
+ * las filas de la lista virtualizada tienen `transform`, y un `position: fixed` dentro de ellas se calcula respecto a la fila.
+ */
+function RelatedPopover({ title, names, anchor, popRef }: { title: string, names: string[], anchor: DOMRect, popRef: React.RefObject<HTMLDivElement | null> }) {
+      const ref = popRef;
       const [pos, setPos] = useState<{ left: number, top: number } | null>(null);
 
       useLayoutEffect(() => {
-            const r = ref.current!.getBoundingClientRect();
-            setPos(placeAbove(anchor, r.width, r.height));
+            // offsetWidth/Height: no incluyen la escala de la animación de entrada, que falsearía la medida
+            setPos(placeBeside(anchor, ref.current!.offsetWidth, ref.current!.offsetHeight));
       }, [anchor]);
 
-      return (
+      return createPortal(
             <div
                   ref={ref}
                   role="tooltip"
                   style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
-                  className="fixed z-50 w-60 rounded-lg bg-ink-900 text-neutral-50 shadow-xl px-3 py-2 text-xs animate-[patient-in_120ms_ease-out]"
+                  className="fixed z-50 w-60 font-sans rounded-lg bg-ink-900 text-neutral-50 shadow-xl px-3 py-2 text-xs animate-[patient-in_120ms_ease-out]"
             >
                   <p className="mb-1.5 text-[10px] uppercase tracking-wider opacity-60">{title} · {names.length}</p>
                   {names.length === 0 ? <p className="opacity-70">Ninguno asignado</p> : (
-                        <ul className="max-h-56 overflow-y-auto flex flex-col gap-1 [scrollbar-width:thin]">
+                        // sin flex: en una columna con scroll los <li> se encogían a alto 0 y solo se veía la barra
+                        <ul className="max-h-56 overflow-y-auto space-y-1 [scrollbar-width:thin]">
                               {names.map((n) => <li key={n} className="truncate">{n}</li>)}
                         </ul>
                   )}
-            </div>
+            </div>,
+            document.body
       );
 }
 
@@ -124,7 +130,8 @@ function PersonCard({ person, kind, related = NO_NAMES, onSave }: PersonCardComp
       const [open, setOpen] = useState(false);
       const [anchor, setAnchor] = useState<DOMRect | null>(null);
       const pillRef = useRef<HTMLDivElement>(null);
-      useDismiss(pillRef, open, () => setOpen(false));
+      const popRef = useRef<HTMLDivElement>(null);
+      useDismiss([pillRef, popRef], open, () => setOpen(false));
       const toggleRelated = () => {
             if (!open) setAnchor(pillRef.current!.getBoundingClientRect());
             setOpen((o) => !o);
@@ -212,7 +219,7 @@ function PersonCard({ person, kind, related = NO_NAMES, onSave }: PersonCardComp
                                     onClick={toggleRelated}
                               />
                         </div>
-                        {open && anchor && <RelatedPopover title={relatedTitle} names={related} anchor={anchor} />}
+                        {open && anchor && <RelatedPopover title={relatedTitle} names={related} anchor={anchor} popRef={popRef} />}
                   </div>
             </div>
       );

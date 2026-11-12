@@ -1,6 +1,12 @@
 export { CONFIG } from "./config/businessrules";
 export { Coordinator, suggestTherapists } from "./coordination/coordinator";
+export { fromCoordinationMap, therapistIdsOf, toCoordinationMap } from "./coordination/map";
+export type { CoordinationMap } from "./coordination/map";
+export { scheduleMonth } from "./scheduling/monthly";
 export { MAX_PATIENTS_AT_HOME, newSession, withAtHome, withPatients, withTherapist } from "./sessions/edit";
 export type { PatientArea } from "./sessions/edit";
+export { deserializeSessions, monthToSessions, serializeSessions } from "./sessions/storage";
+export type { StoredSession, StoredSessions, WeekSession } from "./sessions/storage";
 export type { Area, City, Day, Schedule, TimeRange } from "./types/base";
 export type { Patient, Session, Therapist } from "./types/dtos";
+export type { MonthlyResult } from "./types/scheduling";

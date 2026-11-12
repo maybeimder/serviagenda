@@ -27,20 +27,20 @@ export class Coordinator {
             private readonly therapists: Therapist[],
       ) {}
 
-      /** therapistsPerPatient: id de paciente -> ids de sus terapeutas. */
-      coordinate(): Map<string, Set<string>> {
+      /**
+       * therapistsPerPatient: id de paciente -> ids de sus terapeutas.
+       * `userChoice` simula cuántos terapeutas elegiría el usuario para cada paciente (por defecto, al azar).
+       */
+      coordinate(userChoice: () => number = () => randomInt(1, CONFIG.PatientRelated.maxTherapists)): Map<string, Set<string>> {
             const therapistsPerPatient = new Map<string, Set<string>>();
             for (const patient of this.patients)
-                  therapistsPerPatient.set(patient.id, this.assignTo(patient));
+                  therapistsPerPatient.set(patient.id, this.assignTo(patient, userChoice()));
             return therapistsPerPatient;
       }
 
-      private assignTo(patient: Patient): Set<string> {
+      private assignTo(patient: Patient, userChoiceCount: number): Set<string> {
             const { maxTherapists } = CONFIG.PatientRelated;
             const sameCity = therapistsInCity(this.therapists, patient.city);
-
-            // Simula cuántos terapeutas elegiría el usuario
-            const userChoiceCount = randomInt(1, maxTherapists);
 
             const picked = pickByAvailability(patient, sameCity, { minCount: userChoiceCount, load: this.load });
             this.registerLoad(patient, picked);

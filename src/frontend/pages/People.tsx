@@ -1,9 +1,13 @@
 import AppButton from "@/components/ui/AppButton"
 import PeopleLister from "@/components/people/PeopleLister";
-import { PersonCardProps } from "@/components/people/PersonCard";
-import { Patients, Therapists } from "@data/data";
+import { PersonCardProps, PersonEdit } from "@/components/people/PersonCard";
+import patientsJson from "@data/patients.json";
+import therapistsJson from "@data/therapists.json";
 import { toTitleCase } from "@/utils/toTitleCase";
-import { useDeferredValue, useMemo, useState } from "react"
+import { useDataFile } from "@/data/dataFiles";
+import { therapistIdsOf, CoordinationMap } from "@core/coordination/map";
+import type { Area } from "@core/types/base";
+import { useCallback, useDeferredValue, useMemo, useState } from "react"
 import AppInput from "@/components/ui/AppInput";
 import AppMenu, { AppMenuOption } from "@/components/ui/AppMenu";
 import { City } from "@/types/shared";
@@ -12,18 +16,14 @@ import { useLowMotion } from "@/hooks/useLowMotion";
 
 export type Tab = "patients" | "therapists";
 
-const patients: PersonCardProps[] = Patients.map((p) => ({
-      id: p.id,
-      fullName: toTitleCase(p.name),
-      city: p.city,
-      authorizations: p.sessionsRequirements,
-}));
+// patients.json / therapists.json son las fuentes de verdad (mapas id -> datos); aquí se editan y se vuelven a escribir.
+type PatientRecord = { name: string, city: City, disponibility: unknown, sessionsRequirements: Partial<Record<Area, number>> };
+type TherapistRecord = { name: string, city: City, disponibility: unknown };
+type PatientsFile = Record<string, PatientRecord>;
+type TherapistsFile = Record<string, TherapistRecord>;
 
-const therapists: PersonCardProps[] = Therapists.map((t) => ({
-      id: t.id,
-      fullName: toTitleCase(t.name),
-      city: t.city,
-}));
+const initialPatients = patientsJson as unknown as PatientsFile;
+const initialTherapists = therapistsJson as unknown as TherapistsFile;
 
 type SortBy = "alpha" | "city";
 type CityFilter = City | "all";
@@ -63,8 +63,45 @@ export default function PeopleView() {
       // La búsqueda se difiere para que escribir no espere al re-render de la lista
       const deferredQuery = useDeferredValue(query);
 
-      const visiblePatients   = useMemo(() => filterAndSort(patients,   deferredQuery, sortBy, cityFilter), [deferredQuery, sortBy, cityFilter]);
-      const visibleTherapists = useMemo(() => filterAndSort(therapists, deferredQuery, sortBy, cityFilter), [deferredQuery, sortBy, cityFilter]);
+      const patientsFile = useDataFile<PatientsFile>("patients", initialPatients);
+      const therapistsFile = useDataFile<TherapistsFile>("therapists", initialTherapists);
+      const coordination = useDataFile<CoordinationMap>("coordination", {});
+
+      const patients = useMemo<PersonCardProps[]>(() => Object.entries(patientsFile.data).map(([id, p]) => ({
+            id, fullName: toTitleCase(p.name), city: p.city, authorizations: p.sessionsRequirements,
+      })), [patientsFile.data]);
+      const therapists = useMemo<PersonCardProps[]>(() => Object.entries(therapistsFile.data).map(([id, t]) => ({
+            id, fullName: toTitleCase(t.name), city: t.city,
+      })), [therapistsFile.data]);
+
+      // Según coordination.json: terapeutas de cada paciente y pacientes de cada terapeuta (nombres, para el botón de asociados)
+      const { therapistsOfPatient, patientsOfTherapist } = useMemo(() => {
+            const byName = (a: string, b: string) => a.localeCompare(b, "es");
+            const therapistsOfPatient = new Map<string, string[]>();
+            const patientsOfTherapist = new Map<string, string[]>();
+            for (const [patientId, value] of Object.entries(coordination.data)) {
+                  const patient = patientsFile.data[patientId];
+                  const ids = therapistIdsOf(value).filter((tid) => therapistsFile.data[tid]);
+                  therapistsOfPatient.set(patientId, ids.map((tid) => toTitleCase(therapistsFile.data[tid].name)).sort(byName));
+                  for (const tid of ids)
+                        patientsOfTherapist.set(tid, [...(patientsOfTherapist.get(tid) ?? []), toTitleCase(patient?.name ?? patientId)]);
+            }
+            for (const [tid, names] of patientsOfTherapist) patientsOfTherapist.set(tid, names.sort(byName));
+            return { therapistsOfPatient, patientsOfTherapist };
+      }, [coordination.data, patientsFile.data, therapistsFile.data]);
+
+      // Guardar una edición escribe el archivo completo (tras la confirmación de la card)
+      const savePatient = useCallback((id: string, edit: PersonEdit) => patientsFile.save({
+            ...patientsFile.data,
+            [id]: { ...patientsFile.data[id], name: edit.fullName.toUpperCase(), city: edit.city, sessionsRequirements: edit.authorizations ?? {} },
+      }), [patientsFile]);
+      const saveTherapist = useCallback((id: string, edit: PersonEdit) => therapistsFile.save({
+            ...therapistsFile.data,
+            [id]: { ...therapistsFile.data[id], name: edit.fullName.toUpperCase(), city: edit.city },
+      }), [therapistsFile]);
+
+      const visiblePatients   = useMemo(() => filterAndSort(patients,   deferredQuery, sortBy, cityFilter), [patients, deferredQuery, sortBy, cityFilter]);
+      const visibleTherapists = useMemo(() => filterAndSort(therapists, deferredQuery, sortBy, cityFilter), [therapists, deferredQuery, sortBy, cityFilter]);
 
       return (
             <div className="w-full h-full py-8 flex flex-col gap-6">
@@ -93,8 +130,8 @@ export default function PeopleView() {
                         />
                   </div>
                   <div className="w-full flex-1 min-h-0 min-w-0 flex gap-2">
-                              <PeopleLister collapsed={activeTab !== "patients"} people={visiblePatients} />
-                              <PeopleLister collapsed={activeTab === "patients"} people={visibleTherapists} />
+                              <PeopleLister kind="patient" collapsed={activeTab !== "patients"} people={visiblePatients} related={therapistsOfPatient} onSave={savePatient} />
+                              <PeopleLister kind="therapist" collapsed={activeTab === "patients"} people={visibleTherapists} related={patientsOfTherapist} onSave={saveTherapist} />
                   </div>
             </div>
       )

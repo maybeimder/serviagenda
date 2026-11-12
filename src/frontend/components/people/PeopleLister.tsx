@@ -1,10 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import PersonCard, { PersonCardProps } from "./PersonCard"
+import PersonCard, { PersonCardProps, PersonEdit } from "./PersonCard"
 
 type PeopleListerProps = {
       people : PersonCardProps[]
       collapsed? : boolean
+      kind: "patient" | "therapist"
+      /** id de la persona -> nombres de sus terapeutas (paciente) o de sus pacientes (terapeuta) */
+      related?: Map<string, string[]>
+      onSave?: (id: string, edit: PersonEdit) => Promise<void>
 }
 
 const MIN_CARD_WIDTH = 280;
@@ -78,7 +82,12 @@ export default function PeopleLister(props:PeopleListerProps) {
                                     >
                                           {props.people
                                                 .slice(row.index * columns, row.index * columns + columns)
-                                                .map((person) => <PersonCard key={person.id} person={person} />)}
+                                                .map((person) => (
+                                                      <PersonCard
+                                                            key={person.id} person={person} kind={props.kind}
+                                                            related={props.related?.get(person.id)} onSave={props.onSave}
+                                                      />
+                                                ))}
                                     </div>
                               ))}
                         </div>

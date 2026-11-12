@@ -1,11 +1,13 @@
 import AppButton from "@/components/ui/AppButton"
+import AutoFillButton, { AutoFillScope } from "@/components/ui/AutoFillButton";
 import PatientPicker, { PickedPatient } from "@/components/coordinate/PatientPicker";
 import { City } from "@/types/shared";
 import TherapistPicker, { PickedTherapist, pickedTherapistsById } from "@/components/coordinate/TherapistPicker";
 import { Check, Plus, RotateCw, Sparkles, UserCheck } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CONFIG, suggestTherapists } from "@core/index";
+import { Coordinator, CONFIG, CoordinationMap, therapistIdsOf, toCoordinationMap } from "@core/index";
 import { Patients, Therapists } from "@data/data";
+import { readDataFile, useDataFile, writeDataFile } from "@/data/dataFiles";
 
 const MAX_THERAPISTS = CONFIG.PatientRelated.maxTherapists;
 const ROW_HEIGHT = 56;   // alto de la fila superior del paciente y de cada slot, para que la primera curva sea recta
@@ -82,29 +84,76 @@ export default function CoordinateView() {
             return () => clearTimeout(t);
       }, [toast]);
 
-      const assignTherapists = () => {
-            const n = assignedIds.length;
-            const who = patient ? ` a ${patient.fullName}` : "";
-            // Objeto nuevo en cada clic: reinicia el temporizador aunque el texto sea el mismo
-            setToast({ text: `${n === 1 ? "Terapeuta asignado" : `${n} terapeutas asignados`}${who}` });
-      };
+      // coordination.json = coordinaciones vigentes; opt_coordination.json = el óptimo calculado una sola vez para todos
+      const coordination = useDataFile<CoordinationMap>("coordination", {});
+      const [ busy, setBusy ] = useState(false);
 
-      // Asignar Automáticamente: el core elige los terapeutas que mejor cubren los horarios del paciente
-      const autoAssign = () => {
-            const patientData = patient && Patients.find((p) => p.id === patient.id);
-            if (!patientData) return;
-
-            const suggested = suggestTherapists(patientData, Therapists);
-            if (suggested.length === 0) {
-                  setToast({ text: "Ningún terapeuta de la ciudad comparte horario con el paciente" });
-                  return;
-            }
-
-            const picks = suggested.map((t) => pickedTherapistsById.get(t.id)!);
+      /** Pone en los slots los terapeutas de una entrada del mapa. */
+      const fillSlots = (ids: string[]) => {
+            const picks = ids.flatMap((id) => pickedTherapistsById.get(id) ?? []).slice(0, MAX_THERAPISTS);
             setAssigned([...picks, ...emptyAssigned().slice(picks.length)]);
             setLocked(emptyLocked());
-            setSlotCount(picks.length);
-            setToast({ text: `${picks.length === 1 ? "Terapeuta sugerido" : `${picks.length} terapeutas sugeridos`} para ${patient.fullName}` });
+            setSlotCount(Math.max(1, picks.length));
+            return picks.length;
+      };
+
+      // Al elegir un paciente se muestran sus terapeutas ya coordinados (coordination.json)
+      const pickPatient = (p: PickedPatient) => {
+            setPatient(p);
+            fillSlots(therapistIdsOf(coordination.data[p.id]));
+      };
+
+      // Asignar Terapeutas: una vez fijados todos, se guardan en coordination.json
+      const assignTherapists = async () => {
+            if (!patient) return setToast({ text: "Selecciona un paciente para asignarle los terapeutas" });
+            const ids = assignedIds;
+            const next: CoordinationMap = { ...coordination.data, [patient.id]: ids.length === 1 ? ids[0] : ids };
+            try {
+                  await coordination.save(next);
+                  // Objeto nuevo en cada clic: reinicia el temporizador aunque el texto sea el mismo
+                  setToast({ text: `${ids.length === 1 ? "Terapeuta asignado" : `${ids.length} terapeutas asignados`} a ${patient.fullName}` });
+            } catch (e) {
+                  setToast({ text: `No se pudo guardar: ${e instanceof Error ? e.message : e}` });
+            }
+      };
+
+      /**
+       * Asignar Automáticamente. El óptimo de TODOS los pacientes se calcula una sola vez (Coordinator) y queda en
+       * opt_coordination.json; luego se baja a coordination.json (la verdad):
+       *  - "Todos": coordination.json pasa a ser el óptimo completo.
+       *  - "Uno": solo cambia la entrada del paciente elegido.
+       */
+      const autoAssign = async (scope: AutoFillScope) => {
+            if (busy || (scope === "one" && !patient)) return;
+            setBusy(true);
+            try {
+                  let opt = await readDataFile<CoordinationMap>("opt_coordination");
+                  if (Object.keys(opt).length === 0) {
+                        setToast({ text: "Calculando la coordinación óptima de todos los pacientes…" });
+                        await new Promise((r) => setTimeout(r, 30)); // deja pintar el aviso antes del cálculo
+                        opt = toCoordinationMap(new Coordinator(Patients, Therapists).coordinate());
+                        await writeDataFile("opt_coordination", opt);
+                  }
+
+                  let next: CoordinationMap;
+                  if (scope === "all") next = { ...opt };
+                  else {
+                        next = { ...(await readDataFile<CoordinationMap>("coordination")) };
+                        if (patient!.id in opt) next[patient!.id] = opt[patient!.id];
+                        else delete next[patient!.id];
+                  }
+                  await coordination.save(next);
+
+                  // El paciente elegido queda mostrando su coordinación vigente
+                  const n = patient ? fillSlots(therapistIdsOf(next[patient.id])) : 0;
+                  setToast({ text: scope === "all" ? "Coordinación óptima aplicada a todos los pacientes"
+                        : n === 0 ? `No hay terapeutas compatibles con ${patient!.fullName}`
+                        : `${n === 1 ? "Terapeuta asignado" : `${n} terapeutas asignados`} a ${patient!.fullName}` });
+            } catch (e) {
+                  setToast({ text: `No se pudo coordinar: ${e instanceof Error ? e.message : e}` });
+            } finally {
+                  setBusy(false);
+            }
       };
 
       const changeCity = (city: City) => {
@@ -175,11 +224,16 @@ export default function CoordinateView() {
                         <AppButton variant={activeCity === "STM" ? "primary" : "secondary"} text="STM" onClick={() => changeCity("STM")}/>
                         <AppButton variant={activeCity === "NVA" ? "primary" : "secondary"} text="NVA" onClick={() => changeCity("NVA")}/>
 
-                        {patient && (
-                              <div className="ml-auto animate-[patient-in_200ms_ease-out]">
-                                    <AppButton variant="secondary" icon={Sparkles} iconSize={16} text="Asignar Automáticamente" textClassName="@max-xl:hidden" onClick={autoAssign} />
-                              </div>
-                        )}
+                        <div className="ml-auto">
+                              <AutoFillButton
+                                    icon={Sparkles} text={busy ? "Calculando…" : "Asignar Automáticamente"} textClassName="@max-xl:hidden"
+                                    oneLabel={patient ? `Solo ${patient.fullName}` : null}
+                                    allLabel="Todos los pacientes"
+                                    oneWarning={`Reemplazará la coordinación actual de ${patient?.fullName ?? "este paciente"} en coordination.json por la óptima.`}
+                                    allWarning="Reemplazará TODAS las coordinaciones de coordination.json por las óptimas, incluidas las que ya fijaste a mano."
+                                    busy={busy} onConfirm={autoAssign}
+                              />
+                        </div>
                   </div>
 
                   <div ref={boxRef} className="relative flex justify-center items-start gap-[10vw] pr-[6dvw] pt-[5dvh]">
@@ -195,7 +249,7 @@ export default function CoordinateView() {
                               <h2 className={headingClass}>Paciente</h2>
                               {/* w-fit: el wrapper abraza al botón/mini card, así el origen queda pegado a su borde derecho */}
                               <div ref={patientRef} className="w-fit">
-                                    <PatientPicker city={activeCity} value={patient} onChange={setPatient} />
+                                    <PatientPicker city={activeCity} value={patient} onChange={pickPatient} />
                               </div>
                         </div>
 

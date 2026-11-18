@@ -72,6 +72,8 @@ export default defineConfig({
             },
       },
       server: {
+            // El backend Express (pnpm api:dev); /api/data sigue siendo del plugin de arriba (modo VITE_DATA_SOURCE=files)
+            proxy: { "^/api/(agenda|users|health)": { target: process.env.API_URL ?? "http://localhost:3001", changeOrigin: true } },
             // Los JSON de src/data los escribe la propia app; no deben recargar la página
             watch: { ignored: ["**/src/data/{sessions,coordination,opt_coordination,opt_sessions}.json"] },
       },

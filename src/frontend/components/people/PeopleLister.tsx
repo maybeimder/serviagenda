@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import PersonCard, { PersonCardProps, PersonEdit } from "./PersonCard"
+import PersonCard, { PersonAvailability, PersonCardProps, PersonEdit } from "./PersonCard"
+import { PeopleGridSkeleton } from "../ui/Skeleton"
 
 type PeopleListerProps = {
       people : PersonCardProps[]
@@ -9,6 +10,11 @@ type PeopleListerProps = {
       /** id de la persona -> nombres de sus terapeutas (paciente) o de sus pacientes (terapeuta) */
       related?: Map<string, string[]>
       onSave?: (id: string, edit: PersonEdit) => Promise<void>
+      onSaveAvailability?: (id: string, availability: PersonAvailability) => Promise<void>
+      /** Las personas todavía se están cargando: se muestran cards en gris */
+      loading?: boolean
+      /** La coordinación todavía se está cargando: el contador de asociados de cada card es un skeleton */
+      relatedLoading?: boolean
 }
 
 const MIN_CARD_WIDTH = 280;
@@ -47,6 +53,8 @@ export default function PeopleLister(props:PeopleListerProps) {
 
       useEffect(() => {
             virtualizer.measure();
+            // measure() vacía las medidas y un ResizeObserver solo avisa si el tamaño cambia: se vuelven a medir las filas montadas
+            scrollRef.current?.querySelectorAll("[data-index]").forEach((row) => virtualizer.measureElement(row));
       }, [columns, props.people, virtualizer]);
 
       useEffect(() => {
@@ -68,7 +76,8 @@ export default function PeopleLister(props:PeopleListerProps) {
                               ${props.collapsed ? "opacity-0 pointer-events-none" : "opacity-100 delay-150"}
                         `}
                   >
-                        <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+                        {props.loading && <PeopleGridSkeleton count={Math.max(columns * 3, 6)} />}
+                        <div className="relative w-full" hidden={props.loading} style={{ height: virtualizer.getTotalSize() }}>
                               {!props.collapsed && virtualizer.getVirtualItems().map((row) => (
                                     <div
                                           key={row.key}
@@ -85,7 +94,7 @@ export default function PeopleLister(props:PeopleListerProps) {
                                                 .map((person) => (
                                                       <PersonCard
                                                             key={person.id} person={person} kind={props.kind}
-                                                            related={props.related?.get(person.id)} onSave={props.onSave}
+                                                            related={props.related?.get(person.id)} onSave={props.onSave} onSaveAvailability={props.onSaveAvailability} relatedLoading={props.relatedLoading}
                                                       />
                                                 ))}
                                     </div>

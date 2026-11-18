@@ -8,12 +8,18 @@ import { useAnimateReflow } from "@/hooks/useAnimateReflow"
 import { useDismiss } from "@/hooks/useDismiss"
 import { placeBeside } from "@/utils/placement"
 import AreaBadge, { AREA_ICON_BY_CODE, AREA_LABEL } from "../ui/AreaBadge";
+import AvailabilityBadges, { PersonAvailability } from "./AvailabilityBadges";
+import Skeleton from "../ui/Skeleton";
+
+export type { PersonAvailability };
 
 export type PersonCardProps = {
       id: string
       fullName: string
       city: City
       authorizations?: Partial<Record<Area, number>>
+      /** Horarios disponibles por día (badges de vistazo rápido) */
+      availability?: PersonAvailability
 }
 
 /** Lo que se puede editar de una persona; los terapeutas no tienen autorizaciones. */
@@ -29,8 +35,12 @@ type PersonCardComponentProps = {
       kind: "patient" | "therapist"
       /** Nombres de los terapeutas del paciente, o de los pacientes del terapeuta */
       related?: string[]
+      /** La coordinación todavía carga: el contador de asociados es un skeleton */
+      relatedLoading?: boolean
       /** Guarda la edición (en patients.json / therapists.json). Si no se pasa, la card no es editable. */
       onSave?: (id: string, edit: PersonEdit) => Promise<void>
+      /** Guarda la disponibilidad editada desde los badges. Si no se pasa, los badges son solo de lectura. */
+      onSaveAvailability?: (id: string, availability: PersonAvailability) => Promise<void>
 }
 
 /** Campo numérico de un área al editar: con valor se ve normal; vacío (área sin autorización) a 60% de opacidad. */
@@ -84,7 +94,7 @@ function RelatedPopover({ title, names, anchor, popRef }: { title: string, names
       );
 }
 
-function PersonCard({ person, kind, related = NO_NAMES, onSave }: PersonCardComponentProps) {
+function PersonCard({ person, kind, related = NO_NAMES, relatedLoading, onSave, onSaveAvailability }: PersonCardComponentProps) {
       const badgesRef = useRef<HTMLDivElement>(null);
       useAnimateReflow(badgesRef);
 
@@ -103,6 +113,12 @@ function PersonCard({ person, kind, related = NO_NAMES, onSave }: PersonCardComp
             setError(null);
             setEditing(true);
       };
+
+      // ¿Hay algo distinto a lo guardado? Entonces el botón de guardar se resalta
+      const dirty = editing && (
+            name.trim() !== person.fullName || city !== person.city ||
+            (kind === "patient" && ALL_AREAS.some((a) => (areas[a] ?? "").trim() !== String(person.authorizations?.[a] ?? "")))
+      );
 
       const confirm = async () => {
             const fullName = name.trim();
@@ -142,7 +158,8 @@ function PersonCard({ person, kind, related = NO_NAMES, onSave }: PersonCardComp
       const authorized = Object.keys(person.authorizations ?? {}) as Area[];
 
       return (
-            <div className="@container relative w-full min-w-70 flex items-start px-4 pt-6 pb-9 gap-3 rounded-xl inset-shadow-sm inset-shadow-white/5 shadow-md ">
+            <div className={`@container relative w-full min-w-70 flex flex-col px-4 pt-6 ${person.availability ? "pb-2" : "pb-9"} gap-2 rounded-xl inset-shadow-sm inset-shadow-white/5 shadow-md `}>
+                  <div className="flex items-start gap-3">
                   <PersonAvatar fullName={editing ? name || person.fullName : person.fullName} />
 
                   <div className="flex-1 min-w-0 flex flex-col gap-2">
@@ -186,12 +203,29 @@ function PersonCard({ person, kind, related = NO_NAMES, onSave }: PersonCardComp
 
                         {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
                   </div>
+                  </div>
+
+                  {/* Vistazo rápido de horarios: todo el ancho de la card menos el pill de asociados (abajo a la derecha) */}
+                  {person.availability && (
+                        <AvailabilityBadges
+                              availability={person.availability}
+                              onChange={onSaveAvailability && ((next) => onSaveAvailability(person.id, next))}
+                              allowHome={kind === "patient"}
+                              className="min-h-7 pr-[4.75rem] @max-xs:pr-10"
+                        />
+                  )}
 
                   {onSave && (
                         <div className="absolute top-2 right-2 z-10 flex gap-1">
                               {editing ? (
                                     <>
-                                          <AppButton variant="icon-only" icon={Check} iconSize={14} tooltip={saving ? "Guardando…" : "Guardar"} tooltipSide="left" className="p-1.5! rounded-lg!" onClick={confirm} />
+                                          <AppButton
+                                                variant="icon-only" icon={Check} iconSize={14} tooltipSide="left" loading={saving}
+                                                tooltip={saving ? "Guardando…" : dirty ? "Guardar cambios" : "Guardar"}
+                                                // con cambios sin guardar: verde, con anillo y sombra, para que no pase desapercibido
+                                                className={`p-1.5! rounded-lg! ${dirty ? "bg-emerald-500! text-white! hover:bg-emerald-600! hover:text-white! ring-2 ring-emerald-400/50 shadow-emerald-500/40!" : ""}`}
+                                                onClick={confirm}
+                                          />
                                           <AppButton variant="icon-only" icon={X} iconSize={14} tooltip="Cancelar" tooltipSide="left" className="p-1.5! rounded-lg!" onClick={() => setEditing(false)} />
                                     </>
                               ) : (
@@ -208,7 +242,7 @@ function PersonCard({ person, kind, related = NO_NAMES, onSave }: PersonCardComp
                               className="flex items-center gap-1 pl-2.5 pr-0.5 py-1 text-ink-700 cursor-pointer @max-xs:px-2"
                         >
                               <User size={16} strokeWidth={1.5} />
-                              <span className="@max-xs:hidden tabular-nums">{related.length}</span>
+                              <span className="@max-xs:hidden tabular-nums">{relatedLoading ? <Skeleton className="h-3 w-4" /> : related.length}</span>
                         </div>
                         <div className="@max-xs:hidden">
                               <AppButton

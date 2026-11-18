@@ -39,7 +39,7 @@ export default function AutoFillButton({ icon, text, textClassName, oneLabel, al
             <div ref={ref} className="relative">
                   <AppButton
                         variant="secondary" icon={icon} iconSize={20} text={text} textClassName={textClassName}
-                        active={open} onClick={() => !busy && setOpen((o) => !o)}
+                        loading={busy} active={open} onClick={() => !busy && setOpen((o) => !o)}
                   />
 
                   {open && (

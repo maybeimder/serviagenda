@@ -8,6 +8,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Coordinator, CONFIG, CoordinationMap, therapistIdsOf, toCoordinationMap } from "@core/index";
 import { Patients, Therapists } from "@data/data";
 import { readDataFile, useDataFile, writeDataFile } from "@/data/dataFiles";
+import SaveStatusButton, { SaveState } from "@/components/ui/SaveStatusButton";
+import { TherapistSlotsSkeleton } from "@/components/ui/Skeleton";
 
 const MAX_THERAPISTS = CONFIG.PatientRelated.maxTherapists;
 const ROW_HEIGHT = 56;   // alto de la fila superior del paciente y de cada slot, para que la primera curva sea recta
@@ -103,16 +105,38 @@ export default function CoordinateView() {
             fillSlots(therapistIdsOf(coordination.data[p.id]));
       };
 
+      // Si se eligió un paciente antes de que llegara la coordinación, se muestra apenas llega (sin pisar lo que ya se puso a mano)
+      useEffect(() => {
+            if (coordination.loaded && patient && assigned.every((t) => !t)) fillSlots(therapistIdsOf(coordination.data[patient.id]));
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [coordination.loaded]);
+      useEffect(() => {
+            if (coordination.error) setToast({ text: `No se pudo cargar la coordinación: ${coordination.error}` });
+      }, [coordination.error]);
+
       // Asignar Terapeutas: una vez fijados todos, se guardan en coordination.json
+      // Estado del botón "Asignar Terapeutas": guardando (animado) -> guardado (verde, y vuelven las luces) -> desaparece
+      const [ saveState, setSaveState ] = useState<SaveState>("idle");
+      const savedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+      useEffect(() => () => clearTimeout(savedTimer.current), []);
+
       const assignTherapists = async () => {
             if (!patient) return setToast({ text: "Selecciona un paciente para asignarle los terapeutas" });
+            if (saveState !== "idle") return;
             const ids = assignedIds;
             const next: CoordinationMap = { ...coordination.data, [patient.id]: ids.length === 1 ? ids[0] : ids };
+            setSaveState("saving");
             try {
-                  await coordination.save(next);
+                  // El estado "guardando" se ve al menos un instante aunque la respuesta sea inmediata
+                  await Promise.all([coordination.save(next), new Promise((r) => setTimeout(r, 700))]);
+                  // Confirmación: se sueltan los candados (vuelven las luces) y el botón pasa a "Guardado"
+                  setLocked(emptyLocked());
+                  setSaveState("saved");
+                  savedTimer.current = setTimeout(() => setSaveState("idle"), 1800);
                   // Objeto nuevo en cada clic: reinicia el temporizador aunque el texto sea el mismo
                   setToast({ text: `${ids.length === 1 ? "Terapeuta asignado" : `${ids.length} terapeutas asignados`} a ${patient.fullName}` });
             } catch (e) {
+                  setSaveState("idle");
                   setToast({ text: `No se pudo guardar: ${e instanceof Error ? e.message : e}` });
             }
       };
@@ -213,9 +237,12 @@ export default function CoordinateView() {
                   )}
 
                   <div className="fixed bottom-8 right-8 z-30 flex flex-col items-end gap-3">
-                        {allLocked && (
+                        {(allLocked || saveState !== "idle") && (
                               <div className="animate-[patient-in_200ms_ease-out]">
-                                    <AppButton variant="primary" icon={UserCheck} iconSize={20} text="Asignar Terapeutas" className="shadow-xl" onClick={assignTherapists} />
+                                    <SaveStatusButton
+                                          state={saveState} icon={UserCheck} onClick={assignTherapists}
+                                          idleText="Asignar Terapeutas" savingText="Guardando coordinación…" savedText="Terapeutas asignados"
+                                    />
                               </div>
                         )}
                   </div>
@@ -226,7 +253,7 @@ export default function CoordinateView() {
 
                         <div className="ml-auto">
                               <AutoFillButton
-                                    icon={Sparkles} text={busy ? "Calculando…" : "Asignar Automáticamente"} textClassName="@max-xl:hidden"
+                                    icon={Sparkles} text="Asignar Automáticamente" textClassName="@max-xl:hidden"
                                     oneLabel={patient ? `Solo ${patient.fullName}` : null}
                                     allLabel="Todos los pacientes"
                                     oneWarning={`Reemplazará la coordinación actual de ${patient?.fullName ?? "este paciente"} en coordination.json por la óptima.`}
@@ -263,7 +290,9 @@ export default function CoordinateView() {
                                           className={`p-1! transition-colors ${dimmed ? "text-white/80! hover:text-white!" : ""}`} onClick={resetTherapists}
                                     />
                               </div>
-                              {Array.from({ length: slotCount }, (_, i) => (
+                              {/* La coordinación del paciente todavía no llega: slots en gris */}
+                              {patient && !coordination.loaded && <TherapistSlotsSkeleton />}
+                              {!(patient && !coordination.loaded) && Array.from({ length: slotCount }, (_, i) => (
                                     <div
                                           key={i}
                                           ref={(el) => { slotRefs.current[i] = el; }}

@@ -1,4 +1,5 @@
 import { LucideIcon } from "lucide-react";
+import Skeleton from "./Skeleton";
 
 type AppButtonVariant = "primary" | "secondary" | "ghost" | "tertiary" | "icon-only";
 
@@ -14,6 +15,9 @@ export type AppButtonProps = {
       textClassName?: string
       /** Texto corto que reemplaza a `text` cuando el contenedor (@container) mide menos de 1000px */
       shortText?: string
+
+      /** Trabajando: el texto (o el icono, en los de solo icono) pasa a ser un skeleton y el botón no responde a clics */
+      loading?: boolean;
 
       onClick?: () => void ;
 };
@@ -32,13 +36,20 @@ export default function AppButton(props: AppButtonProps) {
             <div className="relative inline-block group">
                   <button
                         type="button"
-                        onClick={props.onClick}
+                        onClick={props.loading ? undefined : props.onClick}
+                        aria-busy={props.loading || undefined}
                         aria-label={props.variant === "icon-only" || !props.text ?  props.tooltip : props.text}
                         className={`font-medium transition-colors p-3 flex items-center cursor-pointer justify-center gap-3 leading-none ${props.active ? "bg-ink-950! text-ink-50!" : ""} ${variantMap[props.variant ?? "secondary"]} ${props.className ?? ""}`}
                   >
-                        {props.icon && <props.icon size={props.iconSize ?? 32} strokeWidth={1.5} className="shrink-0" />}
+                        {props.icon && (props.loading && props.variant === "icon-only"
+                              ? <Skeleton className="shrink-0 rounded-full bg-current/25!" style={{ width: props.iconSize ?? 32, height: props.iconSize ?? 32 }} />
+                              : <props.icon size={props.iconSize ?? 32} strokeWidth={1.5} className="shrink-0" />)}
                         {props.variant !== "icon-only" && props.text && (
-                              <span className={`whitespace-nowrap ${props.shortText ? "@max-[1000px]:hidden" : ""} ${props.textClassName ?? ""}`}>{props.text}</span>
+                              <span className={`whitespace-nowrap ${props.shortText ? "@max-[1000px]:hidden" : ""} ${props.textClassName ?? ""}`}>
+                                    {props.loading
+                                          ? <Skeleton className="h-3 bg-current/20!" style={{ width: `${Math.max(4, props.text.length * 0.55)}em` }} />
+                                          : props.text}
+                              </span>
                         )}
                         {props.variant !== "icon-only" && props.shortText && (
                               <span className="hidden whitespace-nowrap @max-[1000px]:inline">{props.shortText}</span>

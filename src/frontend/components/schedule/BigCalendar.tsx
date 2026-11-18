@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Building2, CalendarPlus, Clock, Home, Pencil, Shuffle, Trash, UserPlus } from "lucide-react";
 import { Area, Day, TimeRange } from "@core/types/base";
 import { Patient, Session } from "@core/types/dtos";
@@ -65,6 +65,19 @@ type BigCalendarProps = {
       /** `keepPatientId`: con qué paciente queda la sesión cuando tenía varios. */
       onSetSessionAtHome?: (id: string, atHome: boolean, keepPatientId?: string) => void
       onDeleteSession?: (id: string) => void
+      /**
+       * Si se pasa, al seleccionar una sesión aparece un cuadradito en su esquina inferior derecha: arrastrarlo la expande
+       * (hacia abajo se alarga con sesiones de 30 min; hacia la derecha se copia a los días siguientes) y hacia arriba la
+       * acorta (con `onDeleteSession`). `targets` son las sesiones nuevas, copias de `sourceId`, con su id ya generado.
+       */
+      onExpandSession?: (sourceId: string, targets: { id: string, day: Day, schedule: TimeRange }[]) => void
+      /**
+       * ¿Se puede poner una copia de la sesión en ese día y horario? Considera TODA la agenda (el terapeuta o los pacientes
+       * pueden estar ocupados en sesiones que esta vista no muestra); si no se pasa, solo cuentan las sesiones visibles.
+       */
+      canExpandTo?: (sourceId: string, day: Day, schedule: TimeRange) => boolean
+      /** Sesiones ya agendadas por paciente y área (todo el mes): en los menús de áreas se muestra "usadas/autorizadas". */
+      usage?: ReadonlyMap<string, Partial<Record<Area, number>>>
       /** Primera hora visible (formato 24h) */
       startHour?: number
       /** Hora en que termina la grilla (formato 24h) */
@@ -241,6 +254,19 @@ type Drag = {
 };
 
 /**
+ * Expansión con el cuadradito de la esquina (como el controlador de relleno de Excel). El rectángulo va desde el
+ * inicio del bloque hasta (`endDay`, `endSlot`); lo que se suma al bloque son copias de 30 min.
+ */
+type Fill = {
+      ids: string[], sessions: Session[]   // el bloque que se expande
+      day: number, s0: number, s1: number  // columna y slots [s0, s1) del bloque
+      startX: number, startY: number       // puntero al empezar
+      colW: number, rowH: number
+      endDay: number, endSlot: number      // esquina inferior derecha actual (exclusiva en slots)
+      valid: boolean                       // false si choca con otra sesión
+};
+
+/**
  * Vista semanal (lun a sáb) que ocupa todo el alto disponible, sin scroll. Cada fila es una hora con
  * borde marcado y la media hora se distingue con una línea punteada. Las sesiones son tarjetas sobrias
  * (neutral) con una barra de color a la izquierda según el área. Las celdas de 30 min se seleccionan
@@ -249,7 +275,7 @@ type Drag = {
  */
 export default function BigCalendar({
       sessions = [], perspective = "therapist", assignablePatients, patientFocus, onAssignSessions, onMoveSession,
-      onEditSessionPatients, onEditSessionTherapist, onSetSessionAtHome, onDeleteSession, smoothSelection = true,
+      onEditSessionPatients, onEditSessionTherapist, onSetSessionAtHome, onDeleteSession, onExpandSession, canExpandTo, usage, smoothSelection = true,
       startHour = 6, endHour = 18, className = "",
 }: BigCalendarProps) {
       const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
@@ -299,6 +325,9 @@ export default function BigCalendar({
       const [drag, setDrag] = useState<Drag | null>(null);
       const dragRef = useRef<Drag | null>(null);
       dragRef.current = drag;
+      const [fill, setFill] = useState<Fill | null>(null);
+      const fillRef = useRef<Fill | null>(null);
+      fillRef.current = fill;
 
       /** Posición continua del puntero en la grilla; fuera de ella se ajusta al borde (para poder arrastrar más allá). */
       const pointerAt = useCallback((clientX: number, clientY: number): Pointer => {
@@ -331,7 +360,34 @@ export default function BigCalendar({
             }), [placementOf]);
 
       useEffect(() => {
+            /** Rango horario de un slot de 30 min */
+            const slotRange = (slot: number) => ({
+                  start: minsToTime(baseMins + slot * SLOT_MINS), end: minsToTime(baseMins + (slot + 1) * SLOT_MINS),
+            });
+
             const move = (e: MouseEvent) => {
+                  // 0) expansión con el cuadradito de la esquina: la esquina sigue al puntero, con snap a la celda
+                  const f = fillRef.current;
+                  if (f) {
+                        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+                        const endDay = clamp(f.day + Math.round((e.clientX - f.startX) / f.colW), f.day, dayCount - 1);
+                        const endSlot = clamp(f.s1 + Math.round((e.clientY - f.startY) / f.rowH), f.s0 + 1, slotCount);
+                        if (endDay === f.endDay && endSlot === f.endSlot) return;
+                        // Celdas nuevas: la columna del bloque desde su final, y las demás columnas en todo su alto
+                        let valid = true;
+                        for (let d = f.day; d <= endDay && valid; d++) {
+                              const from = d === f.day ? f.s1 : f.s0;
+                              if (endSlot > from && overlaps(f.ids, { day: d, slot: from }, endSlot - from)) valid = false;
+                        }
+                        // Lo que esta vista no muestra también cuenta: el terapeuta o los pacientes pueden estar ocupados en otra agenda
+                        if (valid && canExpandTo)
+                              for (let d = f.day; d <= endDay && valid; d++)
+                                    for (let slot = d === f.day ? f.s1 : f.s0; slot < endSlot; slot++)
+                                          if (!canExpandTo(f.sessions[0].id, WEEK_DAYS[d], slotRange(slot))) { valid = false; break; }
+                        setFill({ ...f, endDay, endSlot, valid });
+                        return;
+                  }
+
                   // 1) selección de celdas
                   if (selecting.current) {
                         const next = selectionBetween(selecting.current, pointerAt(e.clientX, e.clientY), smoothSelection);
@@ -376,6 +432,26 @@ export default function BigCalendar({
             };
 
             const up = () => {
+                  const f = fillRef.current;
+                  if (f) {
+                        setFill(null);
+                        if (!f.valid || (f.endDay === f.day && f.endSlot === f.s1)) return;
+                        // Nuevas: la columna del bloque hacia abajo, y las columnas de la derecha en todo el alto del bloque
+                        const created: { id: string, day: Day, schedule: TimeRange, column: number }[] = [];
+                        for (let d = f.day; d <= f.endDay; d++)
+                              for (let slot = d === f.day ? f.s1 : f.s0; slot < f.endSlot; slot++)
+                                    created.push({ id: crypto.randomUUID(), day: WEEK_DAYS[d], schedule: slotRange(slot), column: d });
+                        // Acortar: se van las sesiones del bloque que empiezan desde el nuevo final
+                        const cutAt = baseMins + f.endSlot * SLOT_MINS;
+                        const removed = f.endSlot < f.s1 ? f.sessions.filter((s) => toMins(s.schedule.start) >= cutAt).map((s) => s.id) : [];
+
+                        if (created.length > 0) onExpandSession?.(f.sessions[0].id, created.map(({ id, day, schedule }) => ({ id, day, schedule })));
+                        removed.forEach((id) => onDeleteSession?.(id));
+                        // La selección sigue siendo el bloque de esa columna, ya expandido o acortado
+                        setSelectedIds([...f.ids.filter((id) => !removed.includes(id)), ...created.filter((c) => c.column === f.day).map((c) => c.id)]);
+                        return;
+                  }
+
                   if (selecting.current) {
                         // Al soltar, el alto y el ancho se ajustan a la celda más cercana (con transición, ver abajo)
                         setSelections((all) => all.length ? [...all.slice(0, -1), snapSelection(all[all.length - 1], dayCount, slotCount)] : all);
@@ -405,7 +481,7 @@ export default function BigCalendar({
             window.addEventListener("mousemove", move);
             window.addEventListener("mouseup", up);
             return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
-      }, [pointerAt, placementOf, overlaps, slotCount, dayCount, baseMins, onMoveSession, smoothSelection]);
+      }, [pointerAt, placementOf, overlaps, slotCount, dayCount, baseMins, onMoveSession, onExpandSession, canExpandTo, onDeleteSession, smoothSelection]);
 
       const onMouseDown = (e: React.MouseEvent) => {
             if (e.button !== 0) return;
@@ -432,6 +508,25 @@ export default function BigCalendar({
             setSelections([]);
             if (!block.ids.some((id) => selectedSet.has(id))) setSelectedIds(block.ids);
             if (onMoveSession) press.current = { x: e.clientX, y: e.clientY };
+      };
+
+      // Cuadradito de la esquina de la sesión seleccionada: empieza a expandirla
+      const onFillStart = (e: React.MouseEvent, block: SessionBlock) => {
+            if (e.button !== 0) return;
+            e.stopPropagation(); // no inicia una selección de celdas
+            e.preventDefault();
+            const rect = daysRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            const s0 = Math.round((block.start - baseMins) / SLOT_MINS), s1 = Math.round((block.end - baseMins) / SLOT_MINS);
+            const day = WEEK_DAYS.indexOf(block.sessions[0].day);
+            setMenu(null);
+            setSessionMenu(null);
+            setHovered(null);
+            setSelections([]);
+            setFill({
+                  ids: block.ids, sessions: block.sessions, day, s0, s1, startX: e.clientX, startY: e.clientY,
+                  colW: rect.width / dayCount, rowH: rect.height / slotCount, endDay: day, endSlot: s1, valid: true,
+            });
       };
 
       // Doble clic: solo el fragmento de 30 min bajo el puntero
@@ -480,7 +575,14 @@ export default function BigCalendar({
 
       /** Lista de "Asignar Nuevas Sesiones" del menú de celdas: pacientes (vista de un terapeuta) o UN terapeuta coordinado (vista de un paciente). */
       const firstName = (name: string) => name.split(" ")[0];
-      const cellPanel: PanelSpec | null =
+
+      /** Agrega a cada opción lo ya agendado por área: el de la persona misma, o el del paciente de la vista si lo que se elige es un terapeuta. */
+      const withUsage = (spec: PanelSpec): PanelSpec => !usage ? spec : {
+            ...spec,
+            patients: spec.patients.map((p) => ({ ...p, used: usage.get(spec.noun === "terapeuta" && patientFocus ? patientFocus.patient.id : p.id) })),
+      };
+
+      const baseCellPanel: PanelSpec | null =
             perspective === "patient"
                   ? patientFocus && patientFocus.coordinatedTherapists.length > 0 ? {
                         label: "Asignar Nuevas Sesiones", icon: CalendarPlus, submitLabel: "Asignar",
@@ -494,6 +596,7 @@ export default function BigCalendar({
                         patients: assignablePatients,
                         onSubmit: (assignments) => onAssignSessions?.(blocks, assignments),
                   } : null;
+      const cellPanel = baseCellPanel && withUsage(baseCellPanel);
 
       /** Listas de personas del menú de una sesión, según desde quién se mira. */
       const sessionPanels = (s: Session, ids: string[]): PanelSpec[] => {
@@ -577,7 +680,7 @@ export default function BigCalendar({
                         key={ids.join("|")}
                         x={sessionMenu.x} y={sessionMenu.y}
                         label={`${DAY_SHORT[WEEK_DAYS.indexOf(s.day)]} · ${formatTime(toMins(s.schedule.start))} – ${formatTime(end)}${s.atHome ? " · en casa" : ""}`}
-                        panels={sessionPanels(s, ids)}
+                        panels={sessionPanels(s, ids).map(withUsage)}
                         actions={actions}
                         onClose={() => setSessionMenu(null)}
                   />
@@ -620,7 +723,7 @@ export default function BigCalendar({
                               ref={daysRef}
                               onMouseDown={onMouseDown}
                               onContextMenu={onContextMenu}
-                              className={`relative flex-1 min-w-0 grid grid-cols-6 ${drag ? "cursor-grabbing [&_*]:cursor-grabbing" : ""}`}
+                              className={`relative flex-1 min-w-0 grid grid-cols-6 ${drag ? "cursor-grabbing [&_*]:cursor-grabbing" : ""} ${fill ? "[&_*]:cursor-crosshair select-none" : ""}`}
                         >
                               {/* Selecciones: un solo rectángulo punteado y morado claro por selección, en porcentajes de la grilla.
                                   Van antes de las columnas para quedar bajo las sesiones. Sin transición mientras se arrastran
@@ -640,6 +743,20 @@ export default function BigCalendar({
                                     />
                               ))}
 
+                              {/* Expansión en curso: rectángulo punteado hasta la celda a la que llega la esquina (rojo si choca) */}
+                              {fill && (
+                                    <div
+                                          aria-hidden
+                                          style={{
+                                                left: `${(fill.day / dayCount) * 100}%`,
+                                                width: `${((fill.endDay - fill.day + 1) / dayCount) * 100}%`,
+                                                top: `${(fill.s0 / slotCount) * 100}%`,
+                                                height: `${((fill.endSlot - fill.s0) / slotCount) * 100}%`,
+                                          }}
+                                          className={`absolute z-10 pointer-events-none border-2 border-dashed ${fill.valid ? "border-violet-500 bg-violet-400/10" : "border-red-500 bg-red-500/15"}`}
+                                    />
+                              )}
+
                               {WEEK_DAYS.map((day) => (
                                     <div key={day} className="relative flex flex-col border-l border-ink-300 dark:border-ink-300/40">
                                           {hours.map((h) => (
@@ -655,9 +772,11 @@ export default function BigCalendar({
                                                 if (block.end <= baseMins || block.start >= baseMins + totalMins) return null;
                                                 // el bloque que se está arrastrando queda como huella tenue mientras su copia se mueve
                                                 const isDragged = !!drag && block.ids.some((id) => drag.ids.includes(id));
+                                                // Cuadradito de expansión: solo con el bloque entero seleccionado (y nada más)
+                                                const showHandle = !!onExpandSession && !drag && !fill && !sessionMenu && selectedIds.length === block.ids.length && block.ids.every((id) => selectedSet.has(id));
                                                 return (
+                                                      <Fragment key={block.ids[0]}>
                                                       <BlockCard
-                                                            key={block.ids[0]}
                                                             sessions={block.sessions}
                                                             perspective={perspective}
                                                             selectedIds={selectedSet}
@@ -673,6 +792,16 @@ export default function BigCalendar({
                                                             className={`absolute inset-x-0.5 shadow-sm transition-opacity duration-150
                                                                   ${movable ? "cursor-grab" : ""} ${isDragged ? (drag.settling ? "opacity-0" : "opacity-30") : ""}`}
                                                       />
+                                                      {showHandle && (
+                                                            <span
+                                                                  aria-label="Expandir sesión" title="Arrastra para expandir"
+                                                                  onMouseDown={(e) => onFillStart(e, block)}
+                                                                  style={{ top: `calc(${((block.end - baseMins) / totalMins) * 100}% - 1px)` }}
+                                                                  // centrado en la esquina inferior derecha de la tarjeta; el ::after agranda el área de clic
+                                                                  className="absolute right-0.5 z-20 size-2 translate-x-1/2 -translate-y-1/2 bg-violet-500 ring-1 ring-white cursor-crosshair after:absolute after:-inset-1.5 after:content-['']"
+                                                            />
+                                                      )}
+                                                      </Fragment>
                                                 );
                                           })}
                                     </div>

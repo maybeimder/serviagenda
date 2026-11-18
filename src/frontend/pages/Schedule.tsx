@@ -1,6 +1,7 @@
 import AppButton from "@/components/ui/AppButton";
+import { CalendarSkeleton } from "@/components/ui/Skeleton";
 import AutoFillButton, { AutoFillScope } from "@/components/ui/AutoFillButton";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Area, Day, TimeRange } from "@core/types/base";
 import { CalendarDays, Check, Save, Sparkles } from "lucide-react";
 import { Tab } from "./People";
@@ -11,10 +12,11 @@ import {
       CoordinationMap, Coordinator, StoredSessions, WeekSession, deserializeSessions, fromCoordinationMap, monthToSessions,
       scheduleMonth, serializeSessions, therapistIdsOf, toCoordinationMap,
 } from "@core/index";
-import { toMins } from "@core/utils/time";
+import { minsToTime, toMins } from "@core/utils/time";
+import { SLOT_MINS } from "@core/config/scheduling";
 import { Patients, Therapists } from "@data/data";
-import { readDataFile, useDataFile, writeDataFile } from "@/data/dataFiles";
-import { coordinatedTherapists } from "@/utils/coordination";
+import { readDataFile, useDataFile, writeAgendaState, writeDataFile } from "@/data/dataFiles";
+import { coordinatedTherapists, withSessionPairs } from "@/utils/coordination";
 import { toTitleCase } from "@/utils/toTitleCase";
 import PersonSelect from "@/components/coordinate/PersonSelect";
 import { patientOptions, therapistOptions, PersonOption } from "@/utils/peopleOptions";
@@ -64,9 +66,13 @@ export default function ScheduleView() {
             setSaving(true);
             try {
                   const stored = serializeSessions(sessions);
-                  await sessionsFile.save(stored);
+                  // Sesiones y coordinación van juntas: todo paciente con una sesión tiene a ese terapeuta coordinado
+                  const coordination = withSessionPairs(coordinationFile.data, sessions);
+                  await writeAgendaState("current", { coordination, sessions: stored });
+                  sessionsFile.setLocal(stored);
+                  coordinationFile.setLocal(coordination);
                   setBaseline(JSON.stringify(stored));
-                  setNotice({ text: "Cambios guardados en sessions.json" });
+                  setNotice({ text: "Cambios guardados" });
             } catch (e) {
                   setNotice({ text: `No se pudo guardar: ${e instanceof Error ? e.message : e}` });
             } finally {
@@ -92,6 +98,40 @@ export default function ScheduleView() {
             setSessions((prev) => prev.map((s) => s.id === id ? keepWeek(s, withAtHome(s, atHome, keepPatientId)) : s)), []);
       const deleteSession = useCallback((id: string) =>
             setSessions((prev) => prev.filter((s) => s.id !== id)), []);
+      // Sesiones ya agendadas por paciente y área (todo el mes, estado actual en pantalla): "usadas" de usadas/autorizadas
+      const usage = useMemo(() => {
+            const byPatient = new Map<string, Partial<Record<Area, number>>>();
+            for (const s of sessions) for (const p of s.patient) {
+                  const area = s.areaPerPatient[p.id];
+                  const counts = byPatient.get(p.id) ?? {};
+                  counts[area] = (counts[area] ?? 0) + 1;
+                  byPatient.set(p.id, counts);
+            }
+            return byPatient;
+      }, [sessions]);
+
+      // Para validar el cuadradito de expansión contra TODA la agenda, no solo lo que se ve
+      const sessionsRef = useRef(sessions);
+      sessionsRef.current = sessions;
+      const canExpandTo = useCallback((sourceId: string, day: Day, schedule: TimeRange) => {
+            const source = sessionsRef.current.find((s) => s.id === sourceId);
+            if (!source) return false;
+            const copy: WeekSession = { ...source, id: "", day, schedule };
+            return !sessionsRef.current.some((o) => o.id !== sourceId && clashes(o, copy));
+      }, []);
+
+      /** Expandir con el cuadradito de la esquina: copias de la sesión (mismo terapeuta, pacientes, áreas y modo) en esas celdas. Las que chocan se saltan. */
+      const expandSession = useCallback((sourceId: string, targets: { id: string, day: Day, schedule: TimeRange }[]) =>
+            setSessions((prev) => {
+                  const source = prev.find((s) => s.id === sourceId);
+                  if (!source) return prev;
+                  const created: WeekSession[] = [];
+                  for (const t of targets) {
+                        const copy: WeekSession = { ...source, id: t.id, day: t.day, schedule: t.schedule };
+                        if (![...prev, ...created].some((o) => clashes(o, copy))) created.push(copy);
+                  }
+                  return created.length ? [...prev, ...created] : prev;
+            }), []);
 
       // Vista de un paciente: cambia el terapeuta de la sesión y el área en que se atiende al paciente
       const editSessionTherapist = useCallback((id: string, therapistId: string, area: Area) =>
@@ -119,12 +159,19 @@ export default function ScheduleView() {
                   ? patient ? [{ patient: patientById.get(patient.id)!, area: assignments[0].area }] : []
                   : assignments.map((a) => ({ patient: patientById.get(a.patient.id)!, area: a.area }));
 
+            // Una sesión por cada slot de 30 min de lo seleccionado (7:00–8:00 son dos: 7:00–7:30 y 7:30–8:00), que se dibujan
+            // juntas como un bloque. Los slots que chocan con otra sesión (de cualquier agenda) se saltan.
             const created: WeekSession[] = [];
-            for (const block of blocks) for (const day of block.days) {
-                  const candidate: WeekSession = { ...newSession(crypto.randomUUID(), { day, schedule: block.schedule, therapist: sessionTherapist }, entries), week };
-                  if (![...visibleSessions, ...created].some((o) => clashes(o, candidate))) created.push(candidate);
-            }
+            let skipped = 0;
+            for (const block of blocks) for (const day of block.days)
+                  for (let t = toMins(block.schedule.start); t < toMins(block.schedule.end); t += SLOT_MINS) {
+                        const schedule = { start: minsToTime(t), end: minsToTime(t + SLOT_MINS) };
+                        const candidate: WeekSession = { ...newSession(crypto.randomUUID(), { day, schedule, therapist: sessionTherapist }, entries), week };
+                        if ([...sessions, ...created].some((o) => clashes(o, candidate))) skipped++;
+                        else created.push(candidate);
+                  }
             setSessions((prev) => [...prev, ...created]);
+            if (skipped > 0) setNotice({ text: `${created.length} sesiones creadas; ${skipped} no, porque chocan con otra sesión` });
       };
 
       // Vista de un paciente: sus terapeutas coordinados (se elige uno) y los demás pacientes que se le pueden sumar a una sesión
@@ -177,7 +224,11 @@ export default function ScheduleView() {
 
                   if (scope === "all") {
                         const stored = serializeSessions(opt);
-                        await writeDataFile("sessions", stored);
+                        // El óptimo se aplica con su coordinación (la de coordination.json manda sobre la óptima), todo junto
+                        const coordinationOut = withSessionPairs(merged, opt);
+                        await writeAgendaState("current", { coordination: coordinationOut, sessions: stored });
+                        coordinationFile.setLocal(coordinationOut);
+                        sessionsFile.setLocal(stored);
                         setSessions(opt);
                         setBaseline(JSON.stringify(stored));
                         setNotice({ text: `Horario óptimo aplicado a todos: ${opt.length} sesiones guardadas` });
@@ -199,7 +250,10 @@ export default function ScheduleView() {
 
                   const truth = replace(deserializeSessions(await readDataFile<StoredSessions>("sessions"), patientById, therapistById));
                   const stored = serializeSessions(truth);
-                  await writeDataFile("sessions", stored);
+                  const coordinationOut = withSessionPairs(coordination, truth);
+                  await writeAgendaState("current", { coordination: coordinationOut, sessions: stored });
+                  coordinationFile.setLocal(coordinationOut);
+                  sessionsFile.setLocal(stored);
                   setBaseline(JSON.stringify(stored));
                   setSessions((prev) => replace(prev));
                   setNotice({ text: candidates.length === 0
@@ -228,7 +282,7 @@ export default function ScheduleView() {
                         <div className="fixed bottom-8 right-8 z-30 animate-[patient-in_200ms_ease-out]">
                               <AppButton
                                     variant="primary" icon={Save} iconSize={20} className="shadow-xl"
-                                    text={saving ? "Guardando…" : "Guardar cambios"} onClick={saveChanges}
+                                    text="Guardar cambios" loading={saving} onClick={saveChanges}
                               />
                         </div>
                   )}
@@ -260,7 +314,7 @@ export default function ScheduleView() {
                         <div className="ml-auto">
                               <AutoFillButton
                                     icon={Sparkles} textClassName="@max-[1000px]:hidden"
-                                    text={filling ? "Calculando…" : "Rellenar Automáticamente"}
+                                    text="Rellenar Automáticamente"
                                     oneLabel={selected ? `Solo ${selected.fullName}` : null}
                                     allLabel={isPatients ? "Todos los pacientes y terapeutas" : "Todos los terapeutas y pacientes"}
                                     oneWarning={`Reemplazará las sesiones de ${selected?.fullName ?? "esta persona"} (las 4 semanas) en sessions.json por las óptimas.`}
@@ -271,7 +325,10 @@ export default function ScheduleView() {
                   </div>
 
                   <div className="w-full flex-1 min-h-0 min-w-0">
-                        {selected ? (
+                        {selected && (!sessionsFile.loaded || filling) ? (
+                              // sesiones todavía bajando, o rellenando automáticamente: el calendario en gris
+                              <CalendarSkeleton />
+                        ) : selected ? (
                               <BigCalendar
                                     key={`${activeTab}-${selected.id}-${week}`}
                                     sessions={visibleSessions}
@@ -280,6 +337,9 @@ export default function ScheduleView() {
                                     onEditSessionTherapist={editSessionTherapist}
                                     onSetSessionAtHome={setSessionAtHome}
                                     onDeleteSession={deleteSession}
+                                    onExpandSession={expandSession}
+                                    canExpandTo={canExpandTo}
+                                    usage={usage}
                                     onAssignSessions={assignSessions}
                                     perspective={isPatients ? "patient" : "therapist"}
                                     // Terapeuta: pacientes de su ciudad. Paciente: sus terapeutas coordinados (ver patientFocus)

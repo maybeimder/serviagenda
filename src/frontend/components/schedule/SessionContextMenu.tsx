@@ -16,6 +16,8 @@ export type AssignablePatient = {
       id: string
       fullName: string
       authorizations?: Partial<Record<Area, number>>
+      /** Sesiones ya agendadas por área: el menú de áreas muestra "usadas/autorizadas" */
+      used?: Partial<Record<Area, number>>
 };
 
 /** Persona elegida con el área en que se le asigna. */
@@ -264,6 +266,7 @@ function PeopleSubmenu({ spec, onClose }: { spec: PanelSpec, onClose: () => void
                                     {menuAreas.map(([area, n]) => {
                                           const { icon: Icon, color } = AREA_ICON_BY_CODE[area];
                                           const selected = areaOf(menuPerson.id) === area;
+                                          const used = menuPerson.used?.[area] ?? 0;
                                           return (
                                                 <button
                                                       key={area}
@@ -278,7 +281,13 @@ function PeopleSubmenu({ spec, onClose }: { spec: PanelSpec, onClose: () => void
                                                       </span>
                                                       <Icon size={14} color={color} className="shrink-0" />
                                                       <span className="truncate">{AREA_LABEL[area]}</span>
-                                                      <span className="ml-auto text-xs text-ink-500 tabular-nums">{n}</span>
+                                                      {/* usadas/autorizadas: en rojo si ya se pasó de lo autorizado, en verde si está completo */}
+                                                      <span
+                                                            title={menuPerson.used ? `${menuPerson.used[area] ?? 0} agendadas de ${n} autorizadas` : `${n} autorizadas`}
+                                                            className={`ml-auto text-xs tabular-nums ${used > n ? "text-red-500 font-medium" : used === n ? "text-emerald-500 font-medium" : "text-ink-500"}`}
+                                                      >
+                                                            {menuPerson.used ? `${used}/${n}` : n}
+                                                      </span>
                                                 </button>
                                           );
                                     })}

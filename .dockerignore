@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.env
+.env.*
+graphify-out
+.claude
+*.log
+Dockerfile
+docker-compose.yml

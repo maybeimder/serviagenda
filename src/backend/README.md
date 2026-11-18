@@ -37,6 +37,13 @@ Capas: `route → middleware(validate) → controller → service → model → 
 | `pnpm db:migrate` | solo lectura: dice qué migraciones faltan. `-- --apply` las aplica (solo `CREATE … IF NOT EXISTS`) |
 | `pnpm db:seed` | solo lectura: valida los JSON y muestra qué cargaría. `-- --apply` carga si las tablas están vacías; `--force` reemplaza; `--only=patients,therapists,coordination,sessions` |
 
+## Docker
+
+- **Dev (por defecto):** `docker compose up --build` -> frontend con Vite en http://localhost:5173 y API en http://localhost:3001/api, con el código montado como volumen (recarga en caliente, sin build).
+- **Producción:** `docker compose -f docker-compose.prod.yml up --build` -> frontend compilado en nginx (http://localhost:8080, redirige `/api` a la API).
+
+Usan el `.env` de la raíz. Scripts de la base: `docker compose run --rm api pnpm db:inspect`.
+
 ## Frontend
 
 `pnpm dev` (Vite) proxea `/api/agenda|users|health` a `http://localhost:3001` (`API_URL` lo cambia), así que hay que tener `pnpm api:dev` corriendo. `src/frontend/data/dataFiles.ts` es la única capa que habla con la API; al arrancar, `app/Boot.tsx` carga pacientes y terapeutas antes de montar la app. Con `VITE_DATA_SOURCE=files` se vuelve a los JSON de `src/data` (plugin de Vite, sin base).

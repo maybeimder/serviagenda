@@ -1,0 +1,56 @@
+# Modo dev (sin build de la app): docker compose up --build
+#   web -> http://localhost:5173 (Vite, con recarga en caliente)    api -> http://localhost:3001/api (tsx watch)
+# El código se monta como volumen: editas en tu equipo y se actualiza solo. Credenciales: el .env de la raíz.
+# Si cambias dependencias (package.json): docker compose up --build -V
+# Para el modo producción (build + nginx): docker compose -f docker-compose.prod.yml up --build
+x-dev: &dev
+  build:
+    context: .
+    target: deps
+  working_dir: /app
+  volumes:
+    - .:/app
+    - node_modules:/app/node_modules   # las dependencias de Linux de la imagen, no las de tu equipo
+  environment:
+    CHOKIDAR_USEPOLLING: "true"        # los volúmenes de Windows no avisan cambios de archivos
+    CHOKIDAR_INTERVAL: "500"
+
+services:
+  api:
+    <<: *dev
+    command: pnpm api:dev
+    env_file: .env
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
+      PORT: 3001
+      CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "${API_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  web:
+    <<: *dev
+    command: pnpm exec vite --host 0.0.0.0 --port 5173
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
+      API_URL: http://api:3001          # el proxy de Vite (vite.config.ts) manda /api a la API
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  node_modules:
+
+# Scripts de la base (no corren con "up"):
+#   docker compose run --rm api pnpm db:inspect
+#   docker compose run --rm api pnpm db:migrate -- --apply
+#   docker compose run --rm api pnpm db:sync-erp -- --requirements --apply

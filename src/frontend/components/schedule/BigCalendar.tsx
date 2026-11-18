@@ -5,15 +5,20 @@ import { Patient, Session } from "@core/types/dtos";
 import { MAX_PATIENTS_AT_HOME } from "@core/sessions/edit";
 import { DAYS, SLOT_MINS } from "@core/config/scheduling";
 import { minsToTime, toMins } from "@core/utils/time";
-import { AREA_ICON_BY_CODE } from "@/components/ui/AreaBadge";
+import { AREA_ICON_BY_CODE, AREA_LABEL } from "@/components/ui/AreaBadge";
 import { toTitleCase } from "@/utils/toTitleCase";
 import SessionContextMenu, { AssignablePatient, Assignment, MAX_PATIENTS_PER_BLOCK, MenuAction, PanelSpec } from "./SessionContextMenu";
 import SessionTooltip from "./SessionTooltip";
 
-/** Días visibles: de lunes a sábado (el domingo no se muestra). */
-const WEEK_DAYS: Day[] = DAYS.filter((d) => d !== "sun");
-const DAY_NAMES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-const DAY_SHORT = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+/**
+ * Una columna del calendario: el día de la semana y, si se muestra un mes real, su número (`dayOfMonth`) y si es hoy.
+ * Una columna `disabled` (un día de otro mes) se ve apagada y no admite crear, mover ni expandir sesiones en ella.
+ */
+export type CalendarColumn = { day: Day, dayOfMonth?: number, isToday?: boolean, disabled?: boolean };
+
+/** Sin `days`: de lunes a sábado, sin números. */
+const DEFAULT_COLUMNS: CalendarColumn[] = DAYS.filter((d) => d !== "sun").map((day) => ({ day }));
+const DAY_SHORT: Record<Day, string> = { sun: "Dom", mon: "Lun", tue: "Mar", wed: "Mié", thu: "Jue", fri: "Vie", sat: "Sáb" };
 
 /** Píxeles que hay que mover el mouse para que un clic sobre una sesión pase a ser un arrastre. */
 const DRAG_THRESHOLD = 4;
@@ -78,6 +83,8 @@ type BigCalendarProps = {
       canExpandTo?: (sourceId: string, day: Day, schedule: TimeRange) => boolean
       /** Sesiones ya agendadas por paciente y área (todo el mes): en los menús de áreas se muestra "usadas/autorizadas". */
       usage?: ReadonlyMap<string, Partial<Record<Area, number>>>
+      /** Columnas (días) que se muestran, en orden. Si no se pasa: lunes a sábado. Pasar siempre el mismo arreglo mientras no cambie la semana. */
+      days?: CalendarColumn[]
       /** Primera hora visible (formato 24h) */
       startHour?: number
       /** Hora en que termina la grilla (formato 24h) */
@@ -177,13 +184,13 @@ function BlockCard({ sessions: group, perspective, className = "", style, select
                   {end - start <= SLOT_MINS ? (
                         // Sesión de 30 min: solo el ícono del área y el nombre, en una línea
                         <div className="h-full pl-3.5 pr-1.5 flex items-center gap-1 text-[11px] leading-none min-w-0">
-                              <Icon size={11} className="shrink-0 text-ink-700" color={s.crossed ? "currentColor" : barBackground(s)} />
+                              <span title={s.crossed ? undefined : AREA_LABEL[areasOf(s)[0]]} className="shrink-0 flex"><Icon size={11} className="text-ink-700" color={s.crossed ? "currentColor" : barBackground(s)} /></span>
                               <span className="truncate font-medium text-ink-900">{sessionLabel(s, perspective)}</span>
                         </div>
                   ) : (
                         <div className="h-full pl-4.5 pr-1.5 pt-1.5 flex flex-col items-start justify-start gap-1 text-[11px] leading-none text-ink-700 min-w-0">
                               <div className="flex gap-1 ml-1 w-full">
-                                    <Icon size={11} className="shrink-0 text-ink-700" color={s.crossed ? "currentColor" : barBackground(s)} />
+                                    <span title={s.crossed ? undefined : AREA_LABEL[areasOf(s)[0]]} className="shrink-0 flex"><Icon size={11} className="text-ink-700" color={s.crossed ? "currentColor" : barBackground(s)} /></span>
                                     <span className="shrink-0 tabular-nums text-ink-500">{formatTime(start)}</span>
                                     {s.atHome && <>·<Home size={10} className="shrink-0 text-ink-800" /></>}
                               </div>
@@ -275,14 +282,19 @@ type Fill = {
  */
 export default function BigCalendar({
       sessions = [], perspective = "therapist", assignablePatients, patientFocus, onAssignSessions, onMoveSession,
-      onEditSessionPatients, onEditSessionTherapist, onSetSessionAtHome, onDeleteSession, onExpandSession, canExpandTo, usage, smoothSelection = true,
+      onEditSessionPatients, onEditSessionTherapist, onSetSessionAtHome, onDeleteSession, onExpandSession, canExpandTo, usage, days, smoothSelection = true,
       startHour = 6, endHour = 18, className = "",
 }: BigCalendarProps) {
       const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
       const baseMins = startHour * 60;
       const totalMins = (endHour - startHour) * 60;
       const slotCount = totalMins / SLOT_MINS;
-      const dayCount = WEEK_DAYS.length;
+      const columns = days ?? DEFAULT_COLUMNS;
+      const WEEK_DAYS = useMemo(() => columns.map((c) => c.day), [columns]);
+      const dayCount = columns.length;
+      // Columnas apagadas (días de otro mes): no se puede seleccionar, crear, mover ni expandir sobre ellas
+      const disabledRef = useRef<boolean[]>([]);
+      disabledRef.current = columns.map((c) => !!c.disabled);
 
       const rootRef = useRef<HTMLDivElement>(null);
       const daysRef = useRef<HTMLDivElement>(null);
@@ -349,7 +361,7 @@ export default function BigCalendar({
       const placementOf = useCallback((s: Session) => ({
             cell: { day: WEEK_DAYS.indexOf(s.day), slot: Math.round((toMins(s.schedule.start) - baseMins) / SLOT_MINS) },
             slots: Math.max(1, Math.round((toMins(s.schedule.end) - toMins(s.schedule.start)) / SLOT_MINS)),
-      }), [baseMins]);
+      }), [baseMins, WEEK_DAYS]);
 
       /** ¿Alguna sesión que no se está moviendo ocupa algo de ese espacio? */
       const overlaps = useCallback((moving: string[], cell: Cell, slots: number) =>
@@ -357,7 +369,7 @@ export default function BigCalendar({
                   if (moving.includes(o.id) || WEEK_DAYS.indexOf(o.day) !== cell.day) return false;
                   const p = placementOf(o);
                   return cell.slot < p.cell.slot + p.slots && cell.slot + slots > p.cell.slot;
-            }), [placementOf]);
+            }), [placementOf, WEEK_DAYS]);
 
       useEffect(() => {
             /** Rango horario de un slot de 30 min */
@@ -377,7 +389,7 @@ export default function BigCalendar({
                         let valid = true;
                         for (let d = f.day; d <= endDay && valid; d++) {
                               const from = d === f.day ? f.s1 : f.s0;
-                              if (endSlot > from && overlaps(f.ids, { day: d, slot: from }, endSlot - from)) valid = false;
+                              if (endSlot > from && (disabledRef.current[d] || overlaps(f.ids, { day: d, slot: from }, endSlot - from))) valid = false;
                         }
                         // Lo que esta vista no muestra también cuenta: el terapeuta o los pacientes pueden estar ocupados en otra agenda
                         if (valid && canExpandTo)
@@ -428,7 +440,7 @@ export default function BigCalendar({
                   const slot = Math.max(0, Math.min(slotCount - current.slots, current.from.slot + Math.round((e.clientY - pressed.y) / current.rowH)));
                   if (day === current.target.day && slot === current.target.slot) return; // sin cambio de celda: sin render
                   const target = { day, slot };
-                  setDrag({ ...current, target, valid: !overlaps(current.ids, target, current.slots) });
+                  setDrag({ ...current, target, valid: !disabledRef.current[day] && !overlaps(current.ids, target, current.slots) });
             };
 
             const up = () => {
@@ -481,7 +493,7 @@ export default function BigCalendar({
             window.addEventListener("mousemove", move);
             window.addEventListener("mouseup", up);
             return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
-      }, [pointerAt, placementOf, overlaps, slotCount, dayCount, baseMins, onMoveSession, onExpandSession, canExpandTo, onDeleteSession, smoothSelection]);
+      }, [pointerAt, placementOf, overlaps, slotCount, dayCount, baseMins, onMoveSession, onExpandSession, canExpandTo, onDeleteSession, smoothSelection, WEEK_DAYS]);
 
       const onMouseDown = (e: React.MouseEvent) => {
             if (e.button !== 0) return;
@@ -489,6 +501,7 @@ export default function BigCalendar({
             setSessionMenu(null);
             setSelectedIds([]); // una celda vacía deja de tener seleccionadas las sesiones
             const cell = cellAt(e.clientX, e.clientY);
+            if (disabledRef.current[cell.day]) return setSelections([]); // día de otro mes: no se selecciona
             const first: Selection = { x0: cell.day, x1: cell.day + 1, y0: cell.slot, y1: cell.slot + 1 };
             // Ctrl (o Cmd) + arrastre agrega otra selección; sin Ctrl se reemplazan todas
             setSelections((all) => e.ctrlKey || e.metaKey ? [...all, first] : [first]);
@@ -554,22 +567,24 @@ export default function BigCalendar({
             if (!cellPanel) return;
             // Clic derecho fuera de las selecciones: se selecciona esa celda, como en una hoja de cálculo
             const cell = cellAt(e.clientX, e.clientY);
+            if (disabledRef.current[cell.day]) return;
             if (!selections.some((s) => containsCell(s, cell)))
                   setSelections([{ x0: cell.day, x1: cell.day + 1, y0: cell.slot, y1: cell.slot + 1 }]);
             setSessionMenu(null);
             setMenu({ x: e.clientX, y: e.clientY });
       };
 
+      // Los días de otro mes que quedaron dentro de una selección se descartan
       const blocks: BlockSelection[] = selections.map((raw) => {
             const s = snapSelection(raw, dayCount, slotCount);
             return {
-                  days: WEEK_DAYS.slice(s.x0, s.x1),
+                  days: WEEK_DAYS.slice(s.x0, s.x1).filter((_, i) => !disabledRef.current[s.x0 + i]),
                   schedule: { start: minsToTime(baseMins + s.y0 * SLOT_MINS), end: minsToTime(baseMins + s.y1 * SLOT_MINS) },
             };
-      });
+      }).filter((b) => b.days.length > 0);
       const blockLabel = (b: BlockSelection) => {
-            const first = WEEK_DAYS.indexOf(b.days[0]), last = WEEK_DAYS.indexOf(b.days[b.days.length - 1]);
-            return `${DAY_SHORT[first]}${last > first ? `–${DAY_SHORT[last]}` : ""} · ${formatTime(toMins(b.schedule.start))} – ${formatTime(toMins(b.schedule.end))}`;
+            const first = b.days[0], last = b.days[b.days.length - 1];
+            return `${DAY_SHORT[first]}${last !== first ? `–${DAY_SHORT[last]}` : ""} · ${formatTime(toMins(b.schedule.start))} – ${formatTime(toMins(b.schedule.end))}`;
       };
       const menuLabel = blocks.length === 1 ? blockLabel(blocks[0]) : `${blocks.length} bloques seleccionados`;
 
@@ -679,7 +694,7 @@ export default function BigCalendar({
                   <SessionContextMenu
                         key={ids.join("|")}
                         x={sessionMenu.x} y={sessionMenu.y}
-                        label={`${DAY_SHORT[WEEK_DAYS.indexOf(s.day)]} · ${formatTime(toMins(s.schedule.start))} – ${formatTime(end)}${s.atHome ? " · en casa" : ""}`}
+                        label={`${DAY_SHORT[s.day]} · ${formatTime(toMins(s.schedule.start))} – ${formatTime(end)}${s.atHome ? " · en casa" : ""}`}
                         panels={sessionPanels(s, ids).map(withUsage)}
                         actions={actions}
                         onClose={() => setSessionMenu(null)}
@@ -697,12 +712,20 @@ export default function BigCalendar({
 
       return (
             <div ref={rootRef} className={`h-full min-h-[28rem] flex flex-col rounded-xl border border-ink-200 bg-neutral-100 ${className}`}>
-                  {/* Encabezado con el nombre de cada día */}
-                  <div className="grid grid-cols-[3.5rem_repeat(6,minmax(0,1fr))] rounded-t-xl bg-neutral-50 border-b border-ink-300 dark:border-ink-300/40">
+                  {/* Encabezado: el número del día (si se muestra un mes) arriba y el nombre debajo; hoy lleva el número resaltado */}
+                  <div style={{ gridTemplateColumns: `3.5rem repeat(${dayCount}, minmax(0, 1fr))` }} className="grid rounded-t-xl bg-neutral-50 border-b border-ink-300 dark:border-ink-300/40">
                         <div className="flex items-end justify-end pr-2 pb-2.5 text-ink-400"><Clock size={14} strokeWidth={1.5} /></div>
-                        {WEEK_DAYS.map((day, i) => (
-                              <div key={day} className="border-l border-ink-200 dark:border-ink-200/40 px-2 py-3.5 text-center">
-                                    <span className="text-sm font-semibold tracking-wide text-ink-800">{DAY_NAMES[i]}</span>
+                        {columns.map((c) => (
+                              <div
+                                    key={c.day}
+                                    className={`border-l border-ink-200 dark:border-ink-200/40 px-2 py-2 flex flex-col items-center justify-center gap-1 leading-none ${c.disabled ? "opacity-40" : ""}`}
+                              >
+                                    {c.dayOfMonth !== undefined && (
+                                          <span className={`text-2xl font-semibold tabular-nums size-10 grid place-items-center rounded-full leading-none ${c.isToday ? "bg-ink-950/20 text-ink-950" : "text-ink-900"}`}>
+                                                {c.dayOfMonth}
+                                          </span>
+                                    )}
+                                    <span className={`text-base font-medium tracking-wide ${c.isToday ? "text-ink-950" : "text-ink-700"} ${c.dayOfMonth === undefined ? "py-2" : ""}`}>{DAY_SHORT[c.day]}</span>
                               </div>
                         ))}
                   </div>
@@ -723,7 +746,8 @@ export default function BigCalendar({
                               ref={daysRef}
                               onMouseDown={onMouseDown}
                               onContextMenu={onContextMenu}
-                              className={`relative flex-1 min-w-0 grid grid-cols-6 ${drag ? "cursor-grabbing [&_*]:cursor-grabbing" : ""} ${fill ? "[&_*]:cursor-crosshair select-none" : ""}`}
+                              style={{ gridTemplateColumns: `repeat(${dayCount}, minmax(0, 1fr))` }}
+                              className={`relative flex-1 min-w-0 grid ${drag ? "cursor-grabbing [&_*]:cursor-grabbing" : ""} ${fill ? "[&_*]:cursor-crosshair select-none" : ""}`}
                         >
                               {/* Selecciones: un solo rectángulo punteado y morado claro por selección, en porcentajes de la grilla.
                                   Van antes de las columnas para quedar bajo las sesiones. Sin transición mientras se arrastran
@@ -757,8 +781,12 @@ export default function BigCalendar({
                                     />
                               )}
 
-                              {WEEK_DAYS.map((day) => (
-                                    <div key={day} className="relative flex flex-col border-l border-ink-300 dark:border-ink-300/40">
+                              {columns.map(({ day, disabled }) => (
+                                    <div
+                                          key={day}
+                                          // un día de otro mes se ve apagado y rayado: ahí no se agenda
+                                          className={`relative flex flex-col border-l border-ink-300 dark:border-ink-300/40 ${disabled ? "bg-[repeating-linear-gradient(135deg,transparent_0_6px,var(--color-ink-200)_6px_7px)] opacity-60 cursor-not-allowed" : ""}`}
+                                    >
                                           {hours.map((h) => (
                                                 <div
                                                       key={h}

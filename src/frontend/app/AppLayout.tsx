@@ -10,6 +10,7 @@ export default function AppLayout() {
       const currentMatch = matches[matches.length - 1];
       const title = (currentMatch?.handle as { title?: string })?.title;
       const Icon  = (currentMatch?.handle as { icon?: LucideIcon })?.icon;
+      const subtitle = (currentMatch?.handle as { subtitle?: string })?.subtitle;
 
       return (
             <div className="flex relative w-full h-screen bg-neutral-100 px-8 py-16 gap-16 font-sans">
@@ -28,7 +29,10 @@ export default function AppLayout() {
                               {title && (
                                     <span className="flex gap-4 items-center">
                                           {Icon && <Icon className="text-ink-700" size={28} />}
-                                          <h1 className="text-3xl font-semibold text-ink-700">{title}</h1>
+                                          <h1 className="text-3xl font-semibold text-ink-700">
+                                                {title}
+                                                {subtitle && <span className="text-ink-500 font-medium"> · {subtitle}</span>}
+                                          </h1>
                                     </span>)}
                               <div className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden"> <Outlet/></div>
                         </div>

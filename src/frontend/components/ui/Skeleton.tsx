@@ -97,7 +97,10 @@ export function CalendarSkeleton() {
                   <div className="grid grid-cols-[3.5rem_repeat(6,minmax(0,1fr))] rounded-t-xl bg-neutral-50 border-b border-ink-300 dark:border-ink-300/40">
                         <div className="flex items-end justify-end pr-2 pb-2.5"><Skeleton className="size-3.5 rounded-full" /></div>
                         {Array.from({ length: 6 }, (_, i) => (
-                              <div key={i} className="border-l border-ink-200 dark:border-ink-200/40 px-2 py-3.5 flex justify-center"><Skeleton className="h-5 w-20" /></div>
+                              // número del día (text-2xl) arriba y su nombre debajo
+                              <div key={i} className="border-l border-ink-200 dark:border-ink-200/40 px-2 py-2 flex flex-col items-center justify-center gap-1">
+                                    <Skeleton className="size-10 rounded-full" /><Skeleton className="h-4 w-9" />
+                              </div>
                         ))}
                   </div>
 
@@ -141,11 +144,13 @@ export function ScheduleViewSkeleton() {
                         <Divider />
                         <Skeleton className="h-12 min-w-50 flex-1 rounded-3xl" />
                         <Divider />
-                        {[1, 2, 3, 4].map((n) => <TextButton key={n} className="w-28 @max-[1000px]:w-14" />)}
+                        {[1, 2, 3, 4, 5].map((n) => <TextButton key={n} className="w-11" />)}
                         <Divider />
                         <TextButton className="ml-auto w-60 @max-[1000px]:w-14" />
                   </div>
-                  <div className="w-full flex-1 min-h-0 min-w-0"><CalendarSkeleton /></div>
+                  <div className="w-full flex-1 min-h-0 min-w-0 flex flex-col gap-2">
+                        <div className="flex-1 min-h-0 min-w-0"><CalendarSkeleton /></div>
+                  </div>
             </div>
       );
 }

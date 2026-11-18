@@ -3,7 +3,7 @@ import { CalendarSkeleton } from "@/components/ui/Skeleton";
 import AutoFillButton, { AutoFillScope } from "@/components/ui/AutoFillButton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Area, Day, TimeRange } from "@core/types/base";
-import { CalendarDays, Check, Save, Sparkles } from "lucide-react";
+import { CalendarDays, Check, Clock, Save, Sparkles } from "lucide-react";
 import { Tab } from "./People";
 import BigCalendar, { BlockSelection, PatientAreaId, PatientFocus } from "@/components/schedule/BigCalendar";
 import type { Assignment } from "@/components/schedule/SessionContextMenu";
@@ -14,14 +14,21 @@ import {
 } from "@core/index";
 import { minsToTime, toMins } from "@core/utils/time";
 import { SLOT_MINS } from "@core/config/scheduling";
+import { CONFIG } from "@core/config/businessrules";
 import { Patients, Therapists } from "@data/data";
 import { readDataFile, useDataFile, writeAgendaState, writeDataFile } from "@/data/dataFiles";
 import { coordinatedTherapists, withSessionPairs } from "@/utils/coordination";
 import { toTitleCase } from "@/utils/toTitleCase";
 import PersonSelect from "@/components/coordinate/PersonSelect";
 import { patientOptions, therapistOptions, PersonOption } from "@/utils/peopleOptions";
+import { currentMonth, weekOfToday, weeksOfMonth } from "@/utils/calendar";
 
 type Option = PersonOption;
+
+// El calendario es el del mes actual: sus semanas (domingo a sábado) y los días reales de cada una
+const MAX_WEEKLY_HOURS = CONFIG.TherapistRelated.WeeklyHours.max;
+const MONTH = currentMonth();
+const WEEKS = weeksOfMonth(MONTH);
 
 const patientById = new Map(Patients.map((p) => [p.id, p]));
 const therapistById = new Map(Therapists.map((t) => [t.id, t]));
@@ -43,7 +50,9 @@ export default function ScheduleView() {
             () => patientOptions.filter((p) => p.city === therapist?.city),
             [therapist?.city]
       );
-      const [week, setWeek] = useState(1);
+      const [week, setWeek] = useState(() => weekOfToday(WEEKS)); // empieza en la semana de hoy
+      // Columnas del calendario para la semana elegida: Dom 1, Lun 2... (los días de otro mes quedan apagados)
+      const columns = useMemo(() => WEEKS[week - 1].days.filter((d) => d.day !== "sun").map((d) => ({ day: d.day, dayOfMonth: d.dayOfMonth, isToday: d.isToday, disabled: !d.inMonth })), [week]);
 
       // ---- Persistencia: sessions.json guarda el estado confirmado; los cambios viven en memoria hasta "Guardar cambios" ----
       const sessionsFile = useDataFile<StoredSessions>("sessions", {});
@@ -98,6 +107,14 @@ export default function ScheduleView() {
             setSessions((prev) => prev.map((s) => s.id === id ? keepWeek(s, withAtHome(s, atHome, keepPatientId)) : s)), []);
       const deleteSession = useCallback((id: string) =>
             setSessions((prev) => prev.filter((s) => s.id !== id)), []);
+      // Horas del terapeuta en la semana que se ve, contra el máximo semanal (cuenta regresiva para no pasarse). Una sesión cruzada cuenta una vez.
+      const weeklyHours = useMemo(() => {
+            if (isPatients || !therapist) return null;
+            const used = sessions.filter((s) => s.week === week && s.therapist.id === therapist.id)
+                  .reduce((sum, s) => sum + (toMins(s.schedule.end) - toMins(s.schedule.start)) / 60, 0);
+            return { used, max: MAX_WEEKLY_HOURS, left: MAX_WEEKLY_HOURS - used };
+      }, [sessions, week, isPatients, therapist]);
+
       // Sesiones ya agendadas por paciente y área (todo el mes, estado actual en pantalla): "usadas" de usadas/autorizadas
       const usage = useMemo(() => {
             const byPatient = new Map<string, Partial<Record<Area, number>>>();
@@ -188,7 +205,7 @@ export default function ScheduleView() {
       /**
        * Rellenar Automáticamente, con el óptimo del core:
        *  - Coordinación a usar: opt_coordination.json con las entradas de coordination.json por encima.
-       *  - El horario óptimo del mes (opt_sessions.json) se calcula para todos una sola vez y se reutiliza.
+       *  - El horario óptimo del mes (opt_sessions.json) se recalcula cada vez, con las autorizaciones y disponibilidades actuales.
        *  - "Todos": sessions.json pasa a ser el óptimo completo (se descartan los cambios sin guardar).
        *  - "Uno": se reemplazan las sesiones de la persona elegida (las 4 semanas) por las óptimas, tanto en sessions.json
        *    como en pantalla; los cambios sin guardar de otras personas siguen pendientes.
@@ -212,15 +229,14 @@ export default function ScheduleView() {
                         .filter((s) => s.patient.every((p) => therapistIdsOf(merged[p.id]).includes(s.therapist.id)));
                   const ofSelected = (s: WeekSession) => isPatients ? s.patient.some((p) => p.id === selected?.id) : s.therapist.id === selected?.id;
 
-                  let opt = optSessions(await readDataFile<StoredSessions>("opt_sessions"));
-                  if (scope === "all" ? opt.length === 0 : !opt.some(ofSelected)) {
-                        setNotice({ text: "Calculando el horario óptimo del mes (puede tardar unos segundos)…" });
-                        await new Promise((r) => setTimeout(r, 30));
-                        const month = scheduleMonth(Patients, Therapists, fromCoordinationMap(merged));
-                        const stored = serializeSessions(monthToSessions(month));
-                        await writeDataFile("opt_sessions", stored);
-                        opt = optSessions(stored);
-                  }
+                  // El horario óptimo se RECALCULA siempre: depende de las autorizaciones (sesiones por área) y de la disponibilidad
+                  // actuales. Reutilizar el guardado daba sesiones de cuando las autorizaciones eran otras (p. ej. antes de corregir SUM*2).
+                  setNotice({ text: "Calculando el horario óptimo del mes (puede tardar unos segundos)…" });
+                  await new Promise((r) => setTimeout(r, 30));
+                  const month = scheduleMonth(Patients, Therapists, fromCoordinationMap(merged));
+                  const optStored = serializeSessions(monthToSessions(month));
+                  await writeDataFile("opt_sessions", optStored);
+                  const opt = optSessions(optStored);
 
                   if (scope === "all") {
                         const stored = serializeSessions(opt);
@@ -292,7 +308,7 @@ export default function ScheduleView() {
                         <AppButton variant={activeTab === "patients"   ? "primary" : "secondary"} text="Pacientes"  onClick={() => setActiveTab("patients")}/>
                         <div className="w-px h-6 bg-ink-300 mx-1 @max-[920px]:hidden"></div>
 
-                        <div className="bg-transparent-50 rounded-3xl shadow-sm shadow-neutral-200 h-fill flex items-center p-1 min-w-50 flex-1 inset-shadow-sm inset-shadow-ink-200">
+                        <div className="bg-transparent-50 rounded-3xl shadow-sm shadow-neutral-200 h-fill flex items-center p-1 min-w-32 flex-1 inset-shadow-sm inset-shadow-ink-200">
                               <PersonSelect
                                     key={activeTab}
                                     people={isPatients ? patientOptions : therapistOptions}
@@ -304,9 +320,21 @@ export default function ScheduleView() {
                               />
                         </div>
 
+                        {weeklyHours && (
+                              <div
+                                    role="status"
+                                    title={weeklyHours.left >= 0 ? `Horas de la semana ${week}: ${weeklyHours.used} de ${weeklyHours.max} permitidas (quedan ${weeklyHours.left})` : `Se pasa ${-weeklyHours.left} h del máximo semanal (${weeklyHours.max} h)`}
+                                    className={`h-10 px-2.5 rounded-3xl flex items-center gap-1.5 text-sm font-medium tabular-nums whitespace-nowrap shadow-sm bg-paper
+                                          ${weeklyHours.left < 0 ? "text-red-500 ring-1 ring-red-500/50" : weeklyHours.left <= 4 ? "text-amber-600 dark:text-amber-300" : "text-ink-700"}`}
+                              >
+                                    <Clock size={16} strokeWidth={1.5} className="@max-[1000px]:hidden" />
+                                    {weeklyHours.used}/{weeklyHours.max} h
+                                    <span className="text-xs font-normal opacity-70 @max-[1000px]:hidden">{weeklyHours.left >= 0 ? `quedan ${weeklyHours.left}` : `+${-weeklyHours.left}`}</span>
+                              </div>
+                        )}
                         <div className="w-px h-6 bg-ink-300 mx-1 @max-[920px]:hidden"></div>
-                        {[1, 2, 3, 4].map((n) => (
-                              <AppButton key={n} variant={week === n ? "primary" : "secondary"} text={`Semana ${n}`} shortText={`S${n}`} onClick={() => setWeek(n)} />
+                        {WEEKS.map(({ number: n }) => (
+                              <AppButton key={n} variant={week === n ? "primary" : "secondary"} text={`Semana ${n}`} shortText={`S${n}`} className="px-2.5!" onClick={() => setWeek(n)} />
                         ))}
                         <div className="w-px h-6 bg-ink-300 mx-1 @max-[920px]:hidden"></div>
 
@@ -324,7 +352,8 @@ export default function ScheduleView() {
                         </div>
                   </div>
 
-                  <div className="w-full flex-1 min-h-0 min-w-0">
+                  <div className="w-full flex-1 min-h-0 min-w-0 flex flex-col gap-2">
+                        <div className="flex-1 min-h-0 min-w-0">
                         {selected && (!sessionsFile.loaded || filling) ? (
                               // sesiones todavía bajando, o rellenando automáticamente: el calendario en gris
                               <CalendarSkeleton />
@@ -340,6 +369,7 @@ export default function ScheduleView() {
                                     onExpandSession={expandSession}
                                     canExpandTo={canExpandTo}
                                     usage={usage}
+                                    days={columns}
                                     onAssignSessions={assignSessions}
                                     perspective={isPatients ? "patient" : "therapist"}
                                     // Terapeuta: pacientes de su ciudad. Paciente: sus terapeutas coordinados (ver patientFocus)
@@ -352,6 +382,7 @@ export default function ScheduleView() {
                                     <p className="text-sm">{isPatients ? "Selecciona un paciente" : "Selecciona un terapeuta"} para ver su agenda</p>
                               </div>
                         )}
+                        </div>
                   </div>
             </div>
       )

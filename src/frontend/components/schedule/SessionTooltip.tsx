@@ -36,6 +36,7 @@ export default function SessionTooltip({ session, anchor }: { session: Session, 
                                     <li key={p.id} className="flex items-center gap-2 whitespace-nowrap">
                                           <Icon size={13} color={color} className="shrink-0" aria-label={AREA_LABEL[area]} />
                                           <span>{toTitleCase(p.name)}</span>
+                                          <span className="opacity-60">· {AREA_LABEL[area]}</span>
                                     </li>
                               );
                         })}
